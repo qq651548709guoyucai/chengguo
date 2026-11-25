@@ -1,0 +1,553 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>熬夜看短剧 · 管理后台</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: #0f1115; color: #e8eaed; min-height: 100vh; }
+  .wrap { max-width: 1000px; margin: 0 auto; padding: 24px 16px 60px; }
+  h1 { font-size: 22px; margin-bottom: 4px; }
+  .sub { color: #8b929c; font-size: 13px; margin-bottom: 24px; }
+  .card { background: #1a1d24; border: 1px solid #2a2f3a; border-radius: 12px; padding: 20px; margin-bottom: 18px; }
+  input, button { font: inherit; }
+  input { background: #0f1115; border: 1px solid #333a47; color: #fff; padding: 10px 12px; border-radius: 8px; width: 100%; }
+  button { background: #ff7a1a; color: #fff; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: 600; }
+  button:hover { background: #ff8c33; }
+  button.ghost { background: #2a2f3a; }
+  button.danger { background: #c0392b; }
+  button.mini { padding: 5px 12px; font-size: 12px; }
+  .row { display: flex; gap: 10px; align-items: center; }
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+  .stat { background: #1a1d24; border: 1px solid #2a2f3a; border-radius: 12px; padding: 16px; text-align: center; }
+  .stat .n { font-size: 28px; font-weight: 700; color: #ff8c33; }
+  .stat .l { font-size: 12px; color: #8b929c; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { text-align: left; padding: 10px 8px; border-bottom: 1px solid #2a2f3a; }
+  th { color: #8b929c; font-weight: 500; }
+  .tag { padding: 2px 8px; border-radius: 20px; font-size: 11px; }
+  .tag.admin { background: #ff7a1a22; color: #ff9a4d; }
+  .tag.off { background: #c0392b22; color: #e57368; }
+  .tag.ok { background: #2ecc7122; color: #5fd39a; }
+  .msg { margin-top: 10px; font-size: 13px; min-height: 18px; }
+  .msg.err { color: #e57368; } .msg.ok { color: #5fd39a; }
+  .hidden { display: none !important; }
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <!-- 登录区 -->
+  <div id="loginView" class="card">
+    <h1>熬夜看短剧 · 管理后台</h1>
+    <div class="sub">用管理员账号登录</div>
+    <div class="row">
+      <input id="user" placeholder="用户名" value="admin" style="flex:1">
+      <input id="pass" type="password" placeholder="密码" style="flex:1">
+      <button onclick="doLogin()">登录</button>
+    </div>
+    <div id="loginMsg" class="msg"></div>
+  </div>
+
+  <!-- 主面板 -->
+  <div id="mainView" class="hidden">
+    <div class="topbar">
+      <div>
+        <h1>管理后台</h1>
+        <div class="sub">用户与数据概览</div>
+      </div>
+      <button class="ghost" onclick="doLogout()">退出</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:12px">
+        <strong>用户列表</strong>
+        <button class="ghost mini" onclick="loadUsers()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>用户名</th><th>角色</th><th>状态</th><th>收藏/点赞/观看</th>
+            <th>注册时间</th><th>最后登录</th><th>操作</th>
+          </tr></thead>
+          <tbody id="userRows"></tbody>
+        </table>
+      </div>
+      <div id="adminMsg" class="msg"></div>
+    </div>
+
+    <!-- 评论管理 -->
+    <div class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:12px">
+        <strong>评论管理</strong>
+        <button class="ghost mini" onclick="loadComments()">刷新</button>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>用户</th><th>所属短剧</th><th>内容</th><th>回复</th><th>时间</th><th>操作</th>
+          </tr></thead>
+          <tbody id="commentRows"></tbody>
+        </table>
+      </div>
+      <div id="commentMsg" class="msg"></div>
+    </div>
+
+    <!-- 公告管理 -->
+    <div class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:12px">
+        <strong>公告管理</strong>
+        <button id="btnAddAnn" class="mini" onclick="openAnnForm()">+ 发布公告</button>
+      </div>
+      <div id="annList"></div>
+      <div id="annMsg" class="msg"></div>
+    </div>
+
+    <!-- 数据源设置（仅超级管理员可见） -->
+    <div id="feedModeCard" class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px">
+        <strong>短剧数据源</strong>
+        <span id="feedModeNow" class="tag">加载中…</span>
+      </div>
+      <div style="font-size:12px;color:#8b929c;margin-bottom:12px;line-height:1.6">
+        切换后立即生效，无需重启服务。红果官方API若在你服务器出口IP被风控，播放会黑屏，请切回稳定源。
+      </div>
+      <div id="feedModeList" class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div id="feedModeMsg" class="msg"></div>
+    </div>
+
+    <!-- 去广告水印设置（仅超级管理员可见） -->
+    <div id="wmCard" class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px">
+        <strong>去广告水印设置</strong>
+        <label style="font-size:12px;color:#8b929c;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="wmEnabled" checked> 启用
+        </label>
+      </div>
+      <div style="font-size:12px;color:#8b929c;margin-bottom:12px;line-height:1.6">
+        短剧里烧录的博彩广告会被高斯模糊抹掉，你可以在那块位置显示自己的文字。修改后已缓存的剧集会在重新播放时用新文字。
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:12px;color:#8b929c;margin-bottom:5px">显示文字（最多 60 字）</div>
+        <input id="wmText" maxlength="60" placeholder="例如：熬夜看短剧 每晚更新"
+          style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+      </div>
+      <div class="row" style="gap:12px;margin-bottom:12px">
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">字号（20-72）</div>
+          <input id="wmSize" type="number" min="20" max="72" value="40"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">文字颜色</div>
+          <input id="wmColor" value="white" placeholder="white / #FFD700"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+      </div>
+      <button class="mini" onclick="saveWatermark()">保存水印设置</button>
+      <div id="wmMsg" class="msg"></div>
+    </div>
+
+    <!-- 管理员管理（仅超级管理员可见） -->
+    <div id="adminMgrCard" class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:12px">
+        <strong>管理员管理</strong>
+        <button class="mini" onclick="openAdminForm()">+ 添加管理员</button>
+      </div>
+      <div id="adminList"></div>
+      <div style="margin-top:16px;padding-top:14px;border-top:1px solid #2a2f3a">
+        <div style="font-size:12px;color:#8b929c;margin-bottom:8px">把现有用户提升为管理员：</div>
+        <div id="promoteList"></div>
+      </div>
+      <div id="adminMgrMsg" class="msg"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 新建管理员弹窗 -->
+<div id="adminModal" class="hidden" style="position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this)closeAdminForm()">
+  <div class="card" style="width:min(420px,92vw)" onclick="event.stopPropagation()">
+    <h2 style="font-size:18px;margin-bottom:14px">添加管理员</h2>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div style="font-size:12px;color:#8b929c;margin-bottom:5px">用户名</div>
+        <input id="newAdminUser" placeholder="2~24 字符" maxlength="24">
+      </div>
+      <div>
+        <div style="font-size:12px;color:#8b929c;margin-bottom:5px">初始密码</div>
+        <input id="newAdminPass" type="password" placeholder="至少 6 位">
+      </div>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:18px;gap:10px">
+      <button class="ghost" onclick="closeAdminForm()">取消</button>
+      <button onclick="createAdmin()">创建</button>
+    </div>
+    <div id="adminFormMsg" class="msg"></div>
+  </div>
+</div>
+
+<!-- 公告编辑弹窗 -->
+<div id="annModal" class="hidden" style="position:fixed;inset:0;background:#000a;display:flex;align-items:center;justify-content:center;z-index:99" onclick="if(event.target===this)closeAnnForm()">
+  <div class="card" style="width:min(560px,92vw);max-height:88vh;overflow:auto" onclick="event.stopPropagation()">
+    <h2 id="annFormTitle" style="font-size:18px;margin-bottom:14px">发布公告</h2>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div>
+        <div style="font-size:12px;color:#8b929c;margin-bottom:5px">标题</div>
+        <input id="annTitle" placeholder="例如：新版更新说明" maxlength="80">
+      </div>
+      <div>
+        <div style="font-size:12px;color:#8b929c;margin-bottom:5px">内容</div>
+        <textarea id="annContent" placeholder="输入公告正文…" rows="7" style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;resize:vertical;font:inherit"></textarea>
+      </div>
+      <label class="row" style="gap:8px;font-size:13px;color:#c8ccd2">
+        <input type="checkbox" id="annPinned" style="width:auto"> 置顶显示
+      </label>
+    </div>
+    <div class="row" style="justify-content:flex-end;margin-top:18px;gap:10px">
+      <button class="ghost" onclick="closeAnnForm()">取消</button>
+      <button onclick="saveAnn()">保存</button>
+    </div>
+    <div id="annFormMsg" class="msg"></div>
+  </div>
+</div>
+
+<!-- 通用确认弹窗（替代 confirm，兼容 App 内嵌 WKWebView） -->
+<div id="confirmModal" class="hidden" style="position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:200" onclick="if(event.target===this)confirmClose(false)">
+  <div class="card" style="width:min(400px,90vw)" onclick="event.stopPropagation()">
+    <div style="font-size:16px;font-weight:600;margin-bottom:10px">请确认</div>
+    <div id="confirmText" style="font-size:14px;color:#c8ccd2;line-height:1.6;margin-bottom:20px"></div>
+    <div class="row" style="justify-content:flex-end;gap:10px">
+      <button class="ghost" onclick="confirmClose(false)">取消</button>
+      <button class="danger" onclick="confirmClose(true)">确定</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const API = ''
+let TOKEN = localStorage.getItem('cg_admin_token') || ''
+let IS_SUPER = false   // 是否超级管理员（id === 'admin'）
+
+function fmt(ts) {
+  if (!ts) return '-'
+  const d = new Date(ts)
+  return d.toLocaleString('zh-CN', { month:'2-digit', day:'2-digit', hour:'2-digit', minute:'2-digit' })
+}
+async function api(path, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers, { 'X-Token': TOKEN })
+  if (opts.body && typeof opts.body !== 'string') {
+    opts.headers['Content-Type'] = 'application/json'
+    opts.body = JSON.stringify(opts.body)
+  }
+  const r = await fetch(API + path, opts)
+  let d = {}
+  try { d = await r.json() } catch {}
+  if (!r.ok) throw new Error(d.error || ('请求失败 ' + r.status))
+  return d
+}
+function msg(id, text, ok) {
+  const el = document.getElementById(id)
+  el.textContent = text
+  el.className = 'msg ' + (ok ? 'ok' : 'err')
+}
+
+async function doLogin() {
+  const user = document.getElementById('user').value.trim()
+  const pass = document.getElementById('pass').value
+  try {
+    const r = await fetch(API + '/api/auth/login', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: user, password: pass }),
+    })
+    const d = await r.json()
+    if (!r.ok) throw new Error(d.error || '登录失败')
+    if (d.user.role !== 'admin') throw new Error('该账号不是管理员')
+    TOKEN = d.token
+    IS_SUPER = (d.user.id === 'admin')
+    localStorage.setItem('cg_admin_token', TOKEN)
+    localStorage.setItem('cg_admin_is_super', IS_SUPER ? '1' : '0')
+    showMain()
+  } catch (e) { msg('loginMsg', e.message, false) }
+}
+function doLogout() {
+  TOKEN = ''
+  IS_SUPER = false
+  localStorage.removeItem('cg_admin_token')
+  localStorage.removeItem('cg_admin_is_super')
+  document.getElementById('mainView').classList.add('hidden')
+  document.getElementById('loginView').classList.remove('hidden')
+}
+function applyPermissionUI() {
+  // 普通管理员隐藏：发布公告按钮、管理员管理卡片、水印设置、数据源设置
+  document.getElementById('btnAddAnn').style.display = IS_SUPER ? '' : 'none'
+  document.getElementById('adminMgrCard').style.display = IS_SUPER ? '' : 'none'
+  document.getElementById('wmCard').style.display = IS_SUPER ? '' : 'none'
+  document.getElementById('feedModeCard').style.display = IS_SUPER ? '' : 'none'
+}
+function showMain() {
+  document.getElementById('loginView').classList.add('hidden')
+  document.getElementById('mainView').classList.remove('hidden')
+  applyPermissionUI()
+  loadStats(); loadUsers(); loadComments(); loadAnnouncements()
+  if (IS_SUPER) { loadAdmins(); loadWatermark(); loadFeedMode() }
+}
+async function loadStats() {
+  try {
+    const d = await api('/api/admin/stats')
+    document.getElementById('stats').innerHTML = `
+      <div class="stat"><div class="n">${d.total}</div><div class="l">总用户</div></div>
+      <div class="stat"><div class="n">${d.todayNew}</div><div class="l">今日新增</div></div>
+      <div class="stat"><div class="n">${d.active}</div><div class="l">近7日活跃</div></div>
+      <div class="stat"><div class="n">${d.disabled}</div><div class="l">已禁用</div></div>`
+  } catch (e) {
+    if (e.message.includes('管理员') || e.message.includes('401') || e.message.includes('403')) doLogout()
+  }
+}
+async function loadUsers() {
+  try {
+    const d = await api('/api/admin/users')
+    const rows = d.users.map(u => {
+      const s = u.stats || {}
+      const roleTag = u.role === 'admin' ? '<span class="tag admin">管理员</span>' : '<span class="tag">用户</span>'
+      const stateTag = u.disabled ? '<span class="tag off">已禁用</span>' : '<span class="tag ok">正常</span>'
+      const ops = u.role === 'admin' ? '-' : `
+        <button class="mini ghost" onclick="toggleUser('${u.id}')">${u.disabled ? '解封' : '禁用'}</button>
+        <button class="mini danger" onclick="deleteUser('${u.id}')">删除</button>`
+      return `<tr>
+        <td>${u.username}</td><td>${roleTag}</td><td>${stateTag}</td>
+        <td>${s.favorites||0} / ${s.likes||0} / ${s.watch||0}</td>
+        <td>${fmt(u.createdAt)}</td><td>${fmt(u.lastLoginAt)}</td><td>${ops}</td>
+      </tr>`
+    }).join('')
+    document.getElementById('userRows').innerHTML = rows
+  } catch (e) { msg('adminMsg', e.message, false) }
+}
+async function toggleUser(id) {
+  if (!await askConfirm('确定切换该用户禁用状态？')) return
+  try { await api('/api/admin/toggle', { method:'POST', body:{ id } }); msg('adminMsg','操作成功',true); loadUsers(); loadStats() }
+  catch (e) { msg('adminMsg', e.message, false) }
+}
+async function deleteUser(id) {
+  if (!await askConfirm('确定删除该用户？不可恢复！')) return
+  try { await api('/api/admin/delete', { method:'POST', body:{ id } }); msg('adminMsg','已删除',true); loadUsers(); loadStats() }
+  catch (e) { msg('adminMsg', e.message, false) }
+}
+async function loadComments() {
+  try {
+    const d = await api('/api/admin/comments')
+    const rows = d.comments.map(c => {
+      const reply = c.replyTo ? `回复 @${c.replyTo}` : '<span style="color:#666">主评论</span>'
+      const adminTag = c.role === 'admin' ? ' <span class="tag admin">管理员</span>' : ''
+      return `<tr>
+        <td>${c.username}${adminTag}</td>
+        <td>${c.seriesTitle || c.seriesId}</td>
+        <td style="max-width:320px; word-break:break-all">${esc(c.text)}</td>
+        <td>${reply}</td>
+        <td>${fmt(c.createdAt)}</td>
+        <td><button class="mini danger" onclick="deleteComment('${c.id}')">删除</button></td>
+      </tr>`
+    }).join('')
+    document.getElementById('commentRows').innerHTML = rows || '<tr><td colspan="6" style="color:#666;text-align:center">暂无评论</td></tr>'
+  } catch (e) { msg('commentMsg', e.message, false) }
+}
+function esc(s) { return (s||'').replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m])) }
+
+// 自绘确认框：返回 Promise<boolean>，兼容 App 内嵌 WKWebView（confirm 不弹窗）
+let _confirmResolve = null
+function askConfirm(text) {
+  return new Promise(resolve => {
+    _confirmResolve = resolve
+    document.getElementById('confirmText').textContent = text
+    document.getElementById('confirmModal').classList.remove('hidden')
+  })
+}
+function confirmClose(result) {
+  document.getElementById('confirmModal').classList.add('hidden')
+  if (_confirmResolve) { const r = _confirmResolve; _confirmResolve = null; r(result) }
+}
+async function deleteComment(id) {
+  if (!await askConfirm('确定删除这条评论？其下的回复也会一起删除。')) return
+  try { await api('/api/admin/comments/delete', { method:'POST', body:{ id } }); msg('commentMsg','评论已删除',true); loadComments() }
+  catch (e) { msg('commentMsg', e.message, false) }
+}
+
+// ---------- 公告管理 ----------
+let editingAnnId = ''
+async function loadAnnouncements() {
+  try {
+    const d = await api('/api/admin/announcements')
+    const list = d.announcements || []
+    window._annCache = list
+    if (!list.length) {
+      document.getElementById('annList').innerHTML = '<div style="color:#666;text-align:center;padding:12px">暂无公告，点右上角发布</div>'
+      return
+    }
+    document.getElementById('annList').innerHTML = list.map(a => {
+      const pinTag = a.pinned ? ' <span class="tag admin">置顶</span>' : ''
+      return `<div style="padding:12px 4px;border-bottom:1px solid #2a2f3a">
+        <div class="row" style="justify-content:space-between;gap:10px">
+          <div style="font-weight:600;color:#fff">${esc(a.title)}${pinTag}</div>
+          ${IS_SUPER ? `<div class="row" style="gap:6px">
+            <button class="mini ghost" onclick="openAnnForm('${a.id}')">编辑</button>
+            <button class="mini danger" onclick="deleteAnn('${a.id}')">删除</button>
+          </div>` : ''}
+        </div>
+        <div style="font-size:12px;color:#9aa1ab;margin-top:6px;white-space:pre-wrap;word-break:break-all">${esc(a.content)}</div>
+        <div style="font-size:11px;color:#666;margin-top:6px">${fmt(a.createdAt)}${a.updatedAt ? ' · 已编辑 ' + fmt(a.updatedAt) : ''}</div>
+      </div>`
+    }).join('')
+  } catch (e) { msg('annMsg', e.message, false) }
+}
+function openAnnForm(id) {
+  editingAnnId = id || ''
+  const a = (window._annCache || []).find(x => x.id === id) || {}
+  document.getElementById('annFormTitle').textContent = id ? '编辑公告' : '发布公告'
+  document.getElementById('annTitle').value = a.title || ''
+  document.getElementById('annContent').value = a.content || ''
+  document.getElementById('annPinned').checked = !!a.pinned
+  document.getElementById('annFormMsg').textContent = ''
+  document.getElementById('annModal').classList.remove('hidden')
+}
+function closeAnnForm() { document.getElementById('annModal').classList.add('hidden') }
+async function saveAnn() {
+  const title = document.getElementById('annTitle').value.trim()
+  const content = document.getElementById('annContent').value.trim()
+  const pinned = document.getElementById('annPinned').checked
+  if (!title || !content) { msg('annFormMsg', '标题和内容不能为空', false); return }
+  try {
+    const body = { title, content, pinned }
+    const path = editingAnnId ? '/api/admin/announcements/update' : '/api/admin/announcements/add'
+    if (editingAnnId) body.id = editingAnnId
+    await api(path, { method: 'POST', body })
+    closeAnnForm(); msg('annMsg', '已保存', true); loadAnnouncements()
+  } catch (e) { msg('annFormMsg', e.message, false) }
+}
+async function deleteAnn(id) {
+  if (!await askConfirm('确定删除这条公告？')) return
+  try { await api('/api/admin/announcements/delete', { method: 'POST', body: { id } }); msg('annMsg','已删除',true); loadAnnouncements() }
+  catch (e) { msg('annMsg', e.message, false) }
+}
+
+// ---------- 管理员管理 ----------
+async function loadAdmins() {
+  try {
+    const d = await api('/api/admin/admins')
+    const admins = d.admins || []
+    document.getElementById('adminList').innerHTML = admins.map(a =>
+      `<div class="row" style="justify-content:space-between;padding:8px 4px;border-bottom:1px solid #2a2f3a">
+        <span>${esc(a.username)} ${a.id === 'admin' ? '<span class="tag admin">超级管理员</span>' : ''}</span>
+        ${a.id === 'admin' ? '<span style="color:#666;font-size:12px">不可撤销</span>'
+          : `<button class="mini danger" onclick="demoteAdmin('${a.id}','${esc(a.username)}')">撤销权限</button>`}
+      </div>`
+    ).join('') || '<div style="color:#666;padding:8px">暂无管理员</div>'
+
+    // 非管理员用户列表（供提升）
+    const ud = await api('/api/admin/users')
+    const regular = (ud.users || []).filter(u => u.role !== 'admin')
+    window._promoteCache = regular
+    document.getElementById('promoteList').innerHTML = regular.length
+      ? regular.map(u => `<span style="display:inline-flex;align-items:center;gap:6px;background:#1a1d24;border:1px solid #2a2f3a;border-radius:20px;padding:5px 10px;margin:0 6px 8px 0">
+          <span>${esc(u.username)}</span>
+          <button class="mini ghost" style="padding:2px 8px" onclick="promoteUser('${u.id}','${esc(u.username)}')">提升</button>
+        </span>`).join('')
+      : '<span style="color:#666;font-size:12px">暂无普通用户</span>'
+  } catch (e) { msg('adminMgrMsg', e.message, false) }
+}
+function openAdminForm() {
+  document.getElementById('newAdminUser').value = ''
+  document.getElementById('newAdminPass').value = ''
+  document.getElementById('adminFormMsg').textContent = ''
+  document.getElementById('adminModal').classList.remove('hidden')
+}
+function closeAdminForm() { document.getElementById('adminModal').classList.add('hidden') }
+async function createAdmin() {
+  const username = document.getElementById('newAdminUser').value.trim()
+  const password = document.getElementById('newAdminPass').value
+  if (!username || !password) { msg('adminFormMsg', '用户名密码不能为空', false); return }
+  try {
+    await api('/api/admin/admins/create', { method: 'POST', body: { username, password } })
+    closeAdminForm(); msg('adminMgrMsg', '管理员已创建', true); loadAdmins(); loadStats()
+  } catch (e) { msg('adminFormMsg', e.message, false) }
+}
+async function promoteUser(id, name) {
+  if (!await askConfirm(`确定把「${name}」提升为管理员？`)) return
+  try { await api('/api/admin/admins/promote', { method: 'POST', body: { id } }); msg('adminMgrMsg','已提升',true); loadAdmins(); loadUsers() }
+  catch (e) { msg('adminMgrMsg', e.message, false) }
+}
+async function demoteAdmin(id, name) {
+  if (!await askConfirm(`确定撤销「${name}」的管理员权限？`)) return
+  try { await api('/api/admin/admins/demote', { method: 'POST', body: { id } }); msg('adminMgrMsg','已撤销',true); loadAdmins(); loadUsers() }
+  catch (e) { msg('adminMgrMsg', e.message, false) }
+}
+
+// ---------- 去广告水印设置 ----------
+async function loadWatermark() {
+  try {
+    const d = await api('/api/watermark')
+    document.getElementById('wmEnabled').checked = d.enabled !== false
+    document.getElementById('wmText').value = d.text || ''
+    document.getElementById('wmSize').value = d.fontSize || 40
+    document.getElementById('wmColor').value = d.fontColor || 'white'
+  } catch (e) { /* 拉取失败静默 */ }
+}
+async function saveWatermark() {
+  const body = {
+    enabled: document.getElementById('wmEnabled').checked,
+    text: document.getElementById('wmText').value.trim(),
+    fontSize: Number(document.getElementById('wmSize').value) || 40,
+    fontColor: document.getElementById('wmColor').value.trim() || 'white',
+  }
+  if (!body.text) { msg('wmMsg', '文字不能为空', false); return }
+  try {
+    await api('/api/admin/watermark/update', { method: 'POST', body })
+    msg('wmMsg', '已保存，新文字将在剧集重新播放时生效', true)
+  } catch (e) { msg('wmMsg', e.message, false) }
+}
+
+// ---------- 数据源设置（热切换）----------
+let FEED_MODES = []
+async function loadFeedMode() {
+  try {
+    const d = await api('/api/admin/feed-mode')
+    FEED_MODES = d.modes || []
+    const label = FEED_MODES.find(m => m.key === d.mode)?.label || d.mode
+    document.getElementById('feedModeNow').textContent = '当前：' + label
+    document.getElementById('feedModeList').innerHTML = FEED_MODES.map(m => `
+      <button class="mini" style="${m.key === d.mode ? 'border-color:#ff8c00;color:#ff8c00' : ''}"
+        onclick="setFeedMode('${m.key}')" title="${esc(m.desc)}">${esc(m.label)}</button>
+    `).join('')
+  } catch (e) { msg('feedModeMsg', e.message, false) }
+}
+async function setFeedMode(mode) {
+  const label = FEED_MODES.find(m => m.key === mode)?.label || mode
+  if (!await askConfirm(`确定切换到「${label}」？立即生效，无需重启。`)) return
+  try {
+    await api('/api/admin/feed-mode', { method: 'POST', body: { mode } })
+    msg('feedModeMsg', `已切换到「${label}」，首页缓存已刷新`, true)
+    await loadFeedMode()
+  } catch (e) { msg('feedModeMsg', e.message, false) }
+}
+
+// ESC 关闭弹窗
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return
+  if (!document.getElementById('confirmModal').classList.contains('hidden')) confirmClose(false)
+  else if (!document.getElementById('adminModal').classList.contains('hidden')) closeAdminForm()
+  else closeAnnForm()
+})
+
+// 启动：已有 token 直接进主面板，失效则回登录
+if (TOKEN) {
+  IS_SUPER = localStorage.getItem('cg_admin_is_super') === '1'
+  api('/api/auth/me').then(d => {
+    IS_SUPER = d.user.id === 'admin'
+    localStorage.setItem('cg_admin_is_super', IS_SUPER ? '1' : '0')
+    showMain()
+  }).catch(() => doLogout())
+}
+</script>
+</body>
+</html>
