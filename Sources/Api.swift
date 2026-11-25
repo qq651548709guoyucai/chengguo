@@ -219,6 +219,92 @@ enum Api {
         try await get("/api/play/\(episodeId)")
     }
 
+    // ---------- 红果官方 API 扩展 ----------
+    // 搜索联想词
+    struct Suggestion: Decodable, Identifiable {
+        let text: String
+        let keyword: String
+        let kind: Int?
+        var id: String { keyword }
+    }
+    static func suggest(_ prefix: String) async throws -> [Suggestion] {
+        struct R: Decodable { let items: [Suggestion] }
+        return (try await get("/api/suggest", query: ["prefix": prefix]) as R).items
+    }
+
+    // 搜索框轮播提示词
+    static func searchCues() async throws -> [String] {
+        struct R: Decodable { let words: [String] }
+        return (try await get("/api/cues") as R).words
+    }
+
+    // 弹幕
+    struct Danmaku: Decodable, Identifiable {
+        let id: String
+        let text: String
+        let offsetMs: Double
+        let createdAt: String?
+        let likes: Int?
+        let plusOnes: Int?
+    }
+    struct DanmakuPage: Decodable {
+        let items: [Danmaku]
+        let startMs: Double?
+        let endMs: Double?
+        let total: Int?
+        let cursor: String?
+        let hasMore: Bool?
+    }
+    static func danmaku(episodeId: String, seriesId: String = "", cursor: String? = nil) async throws -> DanmakuPage {
+        var q: [String: String] = [:]
+        if !seriesId.isEmpty { q["seriesId"] = seriesId }
+        if let cursor, !cursor.isEmpty { q["cursor"] = cursor }
+        return try await get("/api/danmaku/\(episodeId)", query: q)
+    }
+
+    // 相关推荐
+    static func recommend(_ seriesId: String) async throws -> [SeriesItem] {
+        struct R: Decodable { let items: [SeriesItem]; let cellTitle: String? }
+        return (try await get("/api/recommend/\(seriesId)") as R).items
+    }
+
+    // 剧集详情
+    struct SeriesDetail: Decodable {
+        let id: String
+        let title: String
+        let coverUrl: String?
+        let description: String?
+        let episodeCount: Int?
+        let heat: Int?
+        let categories: [String]?
+        let tags: [String]?
+    }
+    static func seriesDetail(_ seriesId: String) async throws -> SeriesDetail {
+        try await get("/api/series/\(seriesId)")
+    }
+
+    // 短剧排行榜
+    struct RankItem: Decodable, Identifiable {
+        let id: String
+        let title: String
+        let coverUrl: String?
+        let rank: Int?
+        let heat: String?
+    }
+    struct RankPage: Decodable {
+        let content: String?
+        let board: String?
+        let items: [RankItem]
+        let hasMore: Bool?
+    }
+    static func rank(content: String? = nil, board: String? = nil, cursor: String? = nil) async throws -> RankPage {
+        var q: [String: String] = [:]
+        if let content { q["content"] = content }
+        if let board { q["board"] = board }
+        if let cursor { q["cursor"] = cursor }
+        return try await get("/api/rank", query: q)
+    }
+
     // ---------- 评论系统 ----------
     struct Comment: Decodable, Identifiable {
         let id: String
