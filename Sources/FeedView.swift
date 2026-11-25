@@ -661,12 +661,11 @@ final class CardModel: ObservableObject {
     }
 
     deinit {
-        // 修复 L3：移除 timeObserver 并暂停播放器，避免异常销毁路径残留观察者
+        // 修复 L3：deinit 是非隔离上下文，不能碰 @MainActor 隔离的 player。
+        // 只移除通知观察者（NSObjectProtocol 非隔离，安全）；
+        // player/timeObserver 的清理放到 pause()（MainActor）里，由 onDisappear 调用。
         if let o = endObserver { NotificationCenter.default.removeObserver(o) }
         if let o = playerErrorObserver { NotificationCenter.default.removeObserver(o) }
-        if let t = timeObserver { player?.removeTimeObserver(t) }
-        player?.pause()
-        player = nil
     }
 
     func start() async {
@@ -708,6 +707,10 @@ final class CardModel: ObservableObject {
 
     func resume() { if started { player?.play() } }
     func pause() {
+        // 修复 L3：在 MainActor 上下文内清理 timeObserver 与 player，
+        // 避免 deinit 里访问 @MainActor 属性触发 Swift 5.9 严格并发编译错误。
+        if let t = timeObserver { player?.removeTimeObserver(t) }
+        timeObserver = nil
         player?.pause()
         saveProgressIfNeeded()   // 退出页面时落盘当前进度
     }
