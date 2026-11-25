@@ -1,0 +1,84 @@
+name: Build Unsigned IPA
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install xcodegen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Archive (unsigned)
+        run: |
+          xcodebuild -project ChengGuo.xcodeproj \
+            -scheme ChengGuo \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/ChengGuo.xcarchive \
+            archive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_REQUIRED=NO
+
+      - name: Package unsigned IPA
+        run: |
+          APP="build/ChengGuo.xcarchive/Products/Applications/ChengGuo.app"
+          ICONSET="Resources/Assets.xcassets/AppIcon.appiconset"
+
+          # 修复图标：unsigned archive 未把 asset catalog 编译成 Assets.car，
+          # 直接按 Apple 传统命名把图标 PNG 复制进 app bundle。
+          cp "$ICONSET/icon_20x20@2x.png"    "$APP/Icon-20@2x.png"
+          cp "$ICONSET/icon_20x20@3x.png"    "$APP/Icon-20@3x.png"
+          cp "$ICONSET/icon_29x29@2x.png"    "$APP/Icon-29@2x.png"
+          cp "$ICONSET/icon_29x29@3x.png"    "$APP/Icon-29@3x.png"
+          cp "$ICONSET/icon_40x40@2x.png"    "$APP/Icon-40@2x.png"
+          cp "$ICONSET/icon_40x40@3x.png"    "$APP/Icon-40@3x.png"
+          cp "$ICONSET/icon_60x60@2x.png"    "$APP/Icon-60@2x.png"
+          cp "$ICONSET/icon_60x60@3x.png"    "$APP/Icon-60@3x.png"
+          cp "$ICONSET/icon_76x76@2x.png"    "$APP/Icon-76@2x.png"
+          cp "$ICONSET/icon_83.5x83.5@2x.png" "$APP/Icon-83.5@2x.png"
+          cp "$ICONSET/icon_1024.png"        "$APP/Icon-1024.png"
+
+          PLIST="$APP/Info.plist"
+          # 移除 asset catalog 图标名（无 Assets.car 时避免系统优先找不到它）
+          /usr/libexec/PlistBuddy -c "Delete :CFBundleIconName" "$PLIST" || true
+          # 写入传统图标键（iPhone + iPad）
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles array" "$PLIST"
+          for f in Icon-20@2x.png Icon-20@3x.png Icon-29@2x.png Icon-29@3x.png Icon-40@2x.png Icon-40@3x.png Icon-60@2x.png Icon-60@3x.png; do
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconFiles:0 string $f" "$PLIST"
+          done
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName string AppIcon" "$PLIST" || true
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons~ipad dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons~ipad:CFBundlePrimaryIcon dict" "$PLIST"
+          /usr/libexec/PlistBuddy -c "Add :CFBundleIcons~ipad:CFBundlePrimaryIcon:CFBundleIconFiles array" "$PLIST"
+          for f in Icon-20@2x.png Icon-20@3x.png Icon-29@2x.png Icon-29@3x.png Icon-40@2x.png Icon-40@3x.png Icon-76@2x.png Icon-83.5@2x.png; do
+            /usr/libexec/PlistBuddy -c "Add :CFBundleIcons~ipad:CFBundlePrimaryIcon:CFBundleIconFiles:0 string $f" "$PLIST"
+          done
+
+          echo "=== 打包后 app 内图标文件 ==="
+          ls -1 "$APP" | grep -i icon || true
+          echo "=== Info.plist 图标键 ==="
+          /usr/libexec/PlistBuddy -c "Print :CFBundleIcons" "$PLIST" || true
+
+          mkdir -p Payload
+          cp -R "$APP" Payload/
+          zip -qry ChengGuo-unsigned.ipa Payload
+          ls -lh ChengGuo-unsigned.ipa
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChengGuo-unsigned-ipa
+          path: ChengGuo-unsigned.ipa
+          retention-days: 30

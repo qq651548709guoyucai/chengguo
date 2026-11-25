@@ -1,0 +1,49 @@
+name: ChengGuo
+options:
+  bundleIdPrefix: com.chengguo
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+
+targets:
+  ChengGuo:
+    type: application
+    platform: iOS
+    sources:
+      - path: Sources
+    resources:
+      - path: Resources/Assets.xcassets
+    info:
+      path: Sources/Info.plist
+      properties:
+        CFBundleDisplayName: 熬夜看短剧
+        CFBundleName: 熬夜看短剧
+        CFBundleIconName: AppIcon
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NSAppTransportSecurity:
+          NSAllowsArbitraryLoads: true
+        ITSAppUsesNonExemptEncryption: false
+    settings:
+      base:
+        TARGETED_DEVICE_FAMILY: "1"
+        SWIFT_VERSION: "5.9"
+        GENERATE_INFOPLIST_FILE: "NO"
+
+schemes:
+  ChengGuo:
+    build:
+      targets:
+        ChengGuo: all
+    run:
+      config: Debug
+    archive:
+      config: Release
