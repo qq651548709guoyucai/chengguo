@@ -176,6 +176,9 @@ struct HotDramaCell: View {
 struct SearchView: View {
     @ObservedObject var store: DramaStore
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+    // 红果官方 API：搜索联想词
+    @State private var suggestions: [Api.Suggestion] = []
+    @State private var suggestTask: Task<Void, Never>?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -187,11 +190,29 @@ struct SearchView: View {
                     TextField("搜索短剧名", text: $store.searchText)
                         .foregroundColor(.white)
                         .submitLabel(.search)
-                        .onSubmit { Task { await store.search(store.searchText) } }
+                        .onSubmit {
+                            suggestions = []
+                            Task { await store.search(store.searchText) }
+                        }
+                        // 红果联想词：300ms 防抖，避免每敲一个字就请求
+                        .onChange(of: store.searchText) { newValue in
+                            suggestTask?.cancel()
+                            let q = newValue.trimmingCharacters(in: .whitespaces)
+                            guard !q.isEmpty else { suggestions = []; return }
+                            suggestTask = Task {
+                                try? await Task.sleep(nanoseconds: 300_000_000)
+                                guard !Task.isCancelled else { return }
+                                if let items = try? await Api.suggest(q), !Task.isCancelled {
+                                    suggestions = Array(items.prefix(8))
+                                }
+                            }
+                        }
                     if !store.searchText.isEmpty {
                         Button {
                             store.searchText = ""
                             store.hasSearched = false
+                            suggestions = []
+                            suggestTask?.cancel()
                         } label: {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.white.opacity(0.5))
@@ -207,6 +228,31 @@ struct SearchView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+
+            // 红果联想词下拉（有输入且未提交搜索时显示）
+            if !suggestions.isEmpty && !store.hasSearched {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(suggestions) { s in
+                            Button {
+                                store.searchText = s.keyword
+                                suggestions = []
+                                Task { await store.search(s.keyword) }
+                            } label: {
+                                Text(s.text)
+                                    .font(.footnote)
+                                    .foregroundColor(.white.opacity(0.9))
+                                    .padding(.horizontal, 12)
+                                    .padding(.vertical, 6)
+                                    .background(Color.white.opacity(0.12), in: Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                    .padding(.horizontal, 14)
+                }
+                .padding(.bottom, 6)
+            }
 
             if !store.hasSearched {
                 hotSearchView
