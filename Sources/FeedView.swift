@@ -179,6 +179,8 @@ struct SearchView: View {
     // 红果官方 API：搜索联想词
     @State private var suggestions: [Api.Suggestion] = []
     @State private var suggestTask: Task<Void, Never>?
+    // 搜索框焦点：提交搜索后主动收起键盘
+    @FocusState private var searchFocused: Bool
 
     var body: some View {
         VStack(spacing: 0) {
@@ -190,7 +192,9 @@ struct SearchView: View {
                     TextField("搜索短剧名", text: $store.searchText)
                         .foregroundColor(.white)
                         .submitLabel(.search)
+                        .focused($searchFocused)
                         .onSubmit {
+                            searchFocused = false   // 收起键盘
                             suggestions = []
                             Task { await store.search(store.searchText) }
                         }
@@ -223,8 +227,12 @@ struct SearchView: View {
                 .frame(height: 38)
                 .background(.white.opacity(0.15), in: Capsule())
 
-                Button("搜索") { Task { await store.search(store.searchText) } }
-                    .foregroundColor(.orange)
+                Button {
+                    searchFocused = false   // 收起键盘
+                    Task { await store.search(store.searchText) }
+                } label: {
+                    Text("搜索").foregroundColor(.orange)
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -255,6 +263,7 @@ struct SearchView: View {
                     HStack(spacing: 8) {
                         ForEach(suggestions) { s in
                             Button {
+                                searchFocused = false
                                 store.searchText = s.keyword
                                 suggestions = []
                                 Task { await store.search(s.keyword) }
