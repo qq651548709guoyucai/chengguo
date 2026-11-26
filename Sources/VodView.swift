@@ -582,6 +582,13 @@ struct VodPlayerView: View {
     @State private var isFullscreen = false
     @State private var isPlaying = true
     @State private var showSeekBar = true
+    // 腾讯视频式控件状态
+    @State private var dragging = false
+    @State private var seekValue: Double = 0
+    @State private var currentSeconds: Double = 0
+    @State private var totalSeconds: Double = 0
+    @State private var speed: Float = 1.0
+    @State private var controlsTimer: Timer?
     @State private var endObserver: NSObjectProtocol?
     @State private var timeObserver: Any?
 
@@ -610,27 +617,183 @@ struct VodPlayerView: View {
         VodOrientation.lock(enter ? .landscapeRight : .portrait)
     }
 
-    // 播放/暂停切换
+    // 播放/暂停切换（保持倍速）
     private func togglePlay() {
         guard let player else { return }
         if player.rate > 0 {
             player.pause()
             isPlaying = false
         } else {
+            player.rate = speed   // 用 rate 恢复，保留用户所选倍速
             player.play()
             isPlaying = true
         }
+        flashControls()
+    }
+
+    // MARK: 腾讯视频式控件辅助
+    private func fmt(_ s: Double) -> String {
+        guard s.isFinite, s > 0 else { return "00:00" }
+        let t = Int(s)
+        if t >= 3600 { return String(format: "%d:%02d:%02d", t / 3600, (t % 3600) / 60, t % 60) }
+        return String(format: "%02d:%02d", t / 60, t % 60)
+    }
+
+    private func speedText(_ s: Float) -> String { String(format: "%gx", s) }
+
+    // 跳转：用播放器真实时间防止 periodic observer 回写污染
+    private func seek(to seconds: Double) {
+        guard let player, let item = player.currentItem else { return }
+        let dur = item.duration
+        guard dur.isValid && dur.seconds.isFinite else { return }
+        let target = max(0, min(seconds, dur.seconds))
+        let t = CMTime(seconds: target, preferredTimescale: 600)
+        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { _ in }
+        currentSeconds = target
+    }
+
+    // 快进(+)/快退(-) 秒：读播放器真实当前时间
+    private func skip(_ delta: Double) {
+        guard let player, let item = player.currentItem else { return }
+        let cur = player.currentTime().seconds.isFinite ? player.currentTime().seconds : 0
+        let target = max(0, cur + delta)
+        seek(to: target)
+        flashControls()
+    }
+
+    private func setSpeed(_ s: Float) {
+        guard let player else { return }
+        player.rate = s
+        speed = s
+        // rate=0 时视为暂停，播放速率影响 isPlaying 判断：显式同步
+        isPlaying = s > 0
+        flashControls()
+    }
+
+    // 显隐控件：点一下切换，播放中 5 秒自动隐藏
+    private func flashControls() {
+        withAnimation(.easeInOut(duration: 0.2)) { showControls.toggle() }
+        controlsTimer?.invalidate()
+        if showControls && isPlaying {
+            controlsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showControls = false }
+                }
+            }
+        }
+    }
+
+    private func showControlsAndResetTimer() {
+        withAnimation(.easeInOut(duration: 0.2)) { showControls = true }
+        controlsTimer?.invalidate()
+        if isPlaying {
+            controlsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showControls = false }
+                }
+            }
+        }
+    }
+
+    // MARK: 腾讯视频式底部控制条
+    private var controlBar: some View {
+        VStack(spacing: 8) {
+            // 进度条 + 当前/总时长
+            HStack(spacing: 10) {
+                Text(fmt(currentSeconds))
+                Slider(value: Binding(
+                    get: { dragging ? seekValue : currentSeconds },
+                    set: { v in if dragging { seekValue = v } }
+                ), in: 0...max(totalSeconds, 1), onEditingChanged: { editing in
+                    dragging = editing
+                    if editing { seekValue = currentSeconds }
+                    else { seek(to: seekValue) }
+                })
+                .tint(.orange)
+                Text(fmt(totalSeconds))
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundColor(.white)
+            .monospacedDigit()
+
+            // 功能按钮行
+            HStack(spacing: 14) {
+                Button { togglePlay() } label: {
+                    Image(systemName: isPlaying ? "pause.fill" : "play.fill").font(.system(size: 20, weight: .semibold))
+                }
+                Button { skip(-10) } label: {
+                    Image(systemName: "gobackward.10").font(.system(size: 21))
+                }
+                Button { skip(10) } label: {
+                    Image(systemName: "goforward.10").font(.system(size: 21))
+                }
+                Button { play(index: currentIndex - 1) } label: {
+                    Image(systemName: "backward.end.fill").font(.system(size: 18))
+                }
+                Button { play(index: currentIndex + 1) } label: {
+                    Image(systemName: "forward.end.fill").font(.system(size: 18))
+                }
+
+                Spacer(minLength: 2)
+
+                // 倍速
+                Menu {
+                    ForEach([0.5, 0.75, 1.0, 1.25, 1.5, 2.0], id: \.self) { r in
+                        Button {
+                            setSpeed(Float(r))
+                        } label: {
+                            HStack {
+                                Text(speedText(Float(r)))
+                                if abs(speed - Float(r)) < 0.01 { Image(systemName: "checkmark") }
+                            }
+                        }
+                    }
+                } label: {
+                    Text(speed >= 0.99 && speed <= 1.01 ? "倍速" : speedText(speed))
+                        .font(.system(size: 13, weight: .semibold))
+                }
+                // 选集
+                Button { showEpisodes = true } label: {
+                    Image(systemName: "list.bullet").font(.system(size: 20))
+                }
+                // 全屏
+                Button { toggleFullscreen() } label: {
+                    Image(systemName: isFullscreen
+                          ? "arrow.down.right.and.arrow.up.left"
+                          : "arrow.up.left.and.arrow.down.right")
+                        .font(.system(size: 19))
+                }
+            }
+            .foregroundColor(.white)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .background(LinearGradient(colors: [.clear, .black.opacity(0.85)], startPoint: .top, endPoint: .bottom))
     }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let player {
+            if let player, !isFailed {
                 AVPlayerLayerView(player: player)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)  // 关键：铺满 ZStack，否则 UIView 固有尺寸为0导致黑屏
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
-                    .onTapGesture { togglePlay() }
+                    .onTapGesture { flashControls() }
+                    .gesture(
+                        DragGesture(minimumDistance: 55).onEnded { v in
+                            let dx = v.translation.width
+                            let dy = v.translation.height
+                            if abs(dy) > abs(dx), abs(dy) > 80 {
+                                // 上下滑切集
+                                if dy < 0 { play(index: currentIndex + 1) }
+                                else { play(index: currentIndex - 1) }
+                            } else if abs(dx) > 80 {
+                                skip(dx < 0 ? 10 : -10)   // 左滑快进 / 右滑快退
+                            }
+                            flashControls()
+                        }
+                    )
             }
 
             // 加载中：显示转圈，避免加密流首帧解码期间纯黑屏以为坏了
@@ -662,16 +825,15 @@ struct VodPlayerView: View {
                 }
             }
 
-            // 中间播放/暂停按钮（暂停时显示；加载失败时隐藏避免与错误提示重叠）
-            if let player, !isPlaying, !isFailed {
+            // 中央大播放按钮（暂停时显示；控件显示时隐藏避免重叠）
+            if let player, !isPlaying, !isFailed, !showControls {
                 Button { togglePlay() } label: {
-                    Image(systemName: "play.fill")
-                        .font(.system(size: 42))
-                        .foregroundColor(.white.opacity(0.9))
-                        .padding(28)
-                        .background(Color.black.opacity(0.35), in: Circle())
+                    Image(systemName: "play.circle.fill")
+                        .font(.system(size: 66))
+                        .foregroundColor(.white.opacity(0.92))
+                        .shadow(radius: 8)
                 }
-                .allowsHitTesting(true)
+                .transition(.scale.combined(with: .opacity))
             }
 
             if let tip {
@@ -684,7 +846,8 @@ struct VodPlayerView: View {
                 }.allowsHitTesting(false)
             }
 
-            // 顶部信息 + 返回（父级不设 allowsHitTesting，保证按钮可点）
+            // 顶部信息 + 返回（腾讯视频式：点画面显隐）
+            if let player, !isFailed, showControls {
             VStack {
                 HStack(alignment: .top) {
                     Button { onClose() } label: {
@@ -715,43 +878,17 @@ struct VodPlayerView: View {
                     .padding(.top, 2)
                 Spacer()
             }
+            }
 
-            // 底部操作栏
-            VStack {
-                Spacer()
-                HStack(spacing: 26) {
+            // 腾讯视频式底部控制条
+            if let player, !isFailed, showControls {
+                VStack {
                     Spacer()
-                    Button { play(index: currentIndex - 1) } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: "backward.fill").font(.system(size: 22))
-                            Text("上一集").font(.caption2)
-                        }.foregroundColor(.white)
-                    }
-                    Button { showEpisodes = true } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: "list.bullet").font(.system(size: 24))
-                            Text("选集").font(.caption2)
-                        }.foregroundColor(.white)
-                    }
-                    Button { play(index: currentIndex + 1) } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: "forward.fill").font(.system(size: 22))
-                            Text("下一集").font(.caption2)
-                        }.foregroundColor(.white)
-                    }
-                    Spacer()
+                    controlBar
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
-                .padding(.bottom, 24)
-                .background(LinearGradient(colors: [.clear, .black.opacity(0.6)], startPoint: .top, endPoint: .bottom))
             }
         }
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 60).onEnded { v in
-                let dy = v.translation.height
-                guard abs(dy) > 80, abs(dy) > abs(v.translation.width) else { return }
-                if dy < 0 { play(index: currentIndex + 1) } else { play(index: currentIndex - 1) }
-            }
-        )
         // 加载失败自动换线路：常驻监听，视图重建也不漏；无候选线路时不再触发避免死循环
         .onReceive(loadState.$phase) { phase in
             if case .failed = phase {
@@ -790,6 +927,7 @@ struct VodPlayerView: View {
             }
             itemObserver?.invalidate(); itemObserver = nil
             if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
+            controlsTimer?.invalidate(); controlsTimer = nil
             player?.pause()
             player?.rate = 0
             player?.replaceCurrentItem(with: nil)
@@ -855,13 +993,34 @@ struct VodPlayerView: View {
             state.phase = .failed("播放出错：\(err?.localizedDescription ?? "可切换线路重试")")
         }
 
-        // 同步真实播放状态：来电/切后台致系统暂停后，中央播放键要正确出现
+        // 同步真实播放状态 + 进度条时间：来电/切后台致系统暂停后，中央播放键要正确出现
         timeObserver = newPlayer.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
         ) { [weak newPlayer] _ in
-            if let p = newPlayer { self.isPlaying = p.timeControlStatus == .playing }
+            guard let p = newPlayer else { return }
+            if !self.dragging {
+                let cur = p.currentTime()
+                if cur.isValid && cur.seconds.isFinite { self.currentSeconds = cur.seconds }
+            }
+            if let dur = p.currentItem?.duration, dur.isValid && dur.seconds.isFinite {
+                self.totalSeconds = dur.seconds
+            }
+            // 用 rate 判断播放态：倍速下 timeControlStatus 仍为 playing，但显式以 rate 为准
+            self.isPlaying = p.rate > 0
         }
+        newPlayer.rate = speed   // 应用用户所选倍速
         newPlayer.play()
+        currentSeconds = 0
+        totalSeconds = 0
+        showControls = true
+        controlsTimer?.invalidate()
+        if isPlaying {
+            controlsTimer = Timer.scheduledTimer(withTimeInterval: 5, repeats: false) { _ in
+                DispatchQueue.main.async {
+                    withAnimation(.easeInOut(duration: 0.2)) { self.showControls = false }
+                }
+            }
+        }
 
         // 播放结束自动下一集
         endObserver = NotificationCenter.default.addObserver(
