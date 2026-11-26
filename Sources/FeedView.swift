@@ -79,21 +79,25 @@ struct PosterCell: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            AsyncImage(url: URL(string: drama.coverUrl)) { phase in
-                switch phase {
-                case .success(let img):
-                    img.resizable().scaledToFill()
-                default:
-                    ZStack {
-                        Color(.systemGray5).opacity(0.25)
-                        Image(systemName: "film").foregroundColor(.white.opacity(0.4))
+            // 固定 9:12 容器，避免图片原始尺寸导致每格高度不一致
+            Color.clear
+                .aspectRatio(9.0 / 12.0, contentMode: .fit)
+                .overlay {
+                    AsyncImage(url: URL(string: drama.coverUrl)) { phase in
+                        switch phase {
+                        case .success(let img):
+                            img.resizable().scaledToFill()
+                        default:
+                            ZStack {
+                                Color(.systemGray5).opacity(0.25)
+                                Image(systemName: "film").foregroundColor(.white.opacity(0.4))
+                            }
+                        }
                     }
+                    .clipped()
                 }
-            }
-            .frame(maxWidth: .infinity)
-            .aspectRatio(9.0 / 12.0, contentMode: .fill)
-            .clipped()
-            .cornerRadius(10)
+                .clipped()
+                .cornerRadius(10)
 
             Text(drama.title)
                 .font(.system(size: 13, weight: .medium))
@@ -120,19 +124,23 @@ struct HotDramaCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack {
-                AsyncImage(url: URL(string: hot.coverUrl)) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        ZStack {
-                            Color(.systemGray5).opacity(0.25)
-                            Image(systemName: "film").foregroundColor(.white.opacity(0.4))
+                // 固定 9:12 容器，避免图片原始尺寸导致每格高度不一致
+                Color.clear
+                    .aspectRatio(9.0 / 12.0, contentMode: .fit)
+                    .overlay {
+                        AsyncImage(url: URL(string: hot.coverUrl)) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img.resizable().scaledToFill()
+                            default:
+                                ZStack {
+                                    Color(.systemGray5).opacity(0.25)
+                                    Image(systemName: "film").foregroundColor(.white.opacity(0.4))
+                                }
+                            }
                         }
+                        .clipped()
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(9.0 / 12.0, contentMode: .fill)
             }
             .clipped()
             .cornerRadius(10)

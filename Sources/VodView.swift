@@ -167,21 +167,25 @@ struct VodPosterCell: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             ZStack(alignment: .bottomTrailing) {
-                AsyncImage(url: URL(string: item.cover ?? "")) { phase in
-                    switch phase {
-                    case .success(let img):
-                        img.resizable().scaledToFill()
-                    default:
-                        ZStack {
-                            Color(.systemGray5).opacity(0.25)
-                            Image(systemName: "film").foregroundColor(.white.opacity(0.4))
+                // 用无原始尺寸的容器严格撑出 9:12 比例，避免图片自身尺寸影响每格高度
+                Color.clear
+                    .aspectRatio(9.0 / 12.0, contentMode: .fit)
+                    .overlay {
+                        AsyncImage(url: URL(string: item.cover ?? "")) { phase in
+                            switch phase {
+                            case .success(let img):
+                                img.resizable().scaledToFill()
+                            default:
+                                ZStack {
+                                    Color(.systemGray5).opacity(0.25)
+                                    Image(systemName: "film").foregroundColor(.white.opacity(0.4))
+                                }
+                            }
                         }
+                        .clipped()
                     }
-                }
-                .frame(maxWidth: .infinity)
-                .aspectRatio(9.0 / 12.0, contentMode: .fill)
-                .clipped()
-                .cornerRadius(10)
+                    .clipped()
+                    .cornerRadius(10)
 
                 if !(item.remarks ?? "").isEmpty {
                     Text(item.remarks ?? "")
