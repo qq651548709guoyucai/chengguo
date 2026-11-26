@@ -366,14 +366,19 @@ app.get('/api/vodseg', wrap(async (req, res) => {
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')))
 app.use('/static', express.static(path.join(__dirname, 'static')))
 
-// 首页短剧数据源开关：STABLE_FEED=1（默认开启）走苹果CMS稳定源；
-// 设为 0 则回退红果 worker。稳定源绕开红果逆向接口失效导致的黑屏。
+// 数据源开关（2026-11-26 拆分，红果接口已修复，实测可正常取数）：
+//   HG_FEED=1（默认）→ 首页 /api/feed 与热搜 /api/hot 走红果官方 API；设 0 回退苹果CMS稳定源。
+//   STABLE_FEED=1（默认）→ 搜索 /api/search 仍走苹果CMS稳定源；设 0 回退红果 worker。
+//   分集 /api/episodes 按 id 前缀自动分流：vod_ 走苹果CMS，纯数字 id 走红果。
+const HG_FEED = (process.env.HG_FEED ?? '1') !== '0'
 const STABLE_FEED = (process.env.STABLE_FEED ?? '1') !== '0'
 
 app.get('/api/feed', wrap(async (req) => {
   const t = (req.query.type || 'real').toString()
-  if (STABLE_FEED) return cached(`sf:feed:${t}`, 30 * 60 * 1000, () => stableFeed(FEED_TYPES.includes(t) ? t : 'real'))
-  return getFeed(FEED_TYPES.includes(t) ? t : 'real')
+  const type = FEED_TYPES.includes(t) ? t : 'real'
+  if (HG_FEED) return getFeed(type)   // 红果池子自带去重/洗牌/后台续拉，不套缓存
+  if (STABLE_FEED) return cached(`sf:feed:${type}`, 30 * 60 * 1000, () => stableFeed(type))
+  return getFeed(type)
 }))
 app.get('/api/search', wrap(async (req) => {
   const q = (req.query.q || '').toString().trim()
@@ -382,6 +387,7 @@ app.get('/api/search', wrap(async (req) => {
   return cached(`search:${q}`, 30 * 60 * 1000, () => runWorker({ op: 'search', q }))
 }))
 app.get('/api/hot', wrap(() => {
+  if (HG_FEED) return cached('hg:hot', 30 * 60 * 1000, () => runWorker({ op: 'hot' }))
   if (STABLE_FEED) return cached('sf:hot', 30 * 60 * 1000, () => stableHot())
   return cached('hot', 30 * 60 * 1000, () => runWorker({ op: 'hot' }))
 }))
