@@ -18,7 +18,7 @@ import {
   listAnnouncements, adminListAnnouncements, addAnnouncement,
   updateAnnouncement, deleteAnnouncement,
 } from './announcements.mjs'
-import { listVod, vodCategories, detailVod } from './vod.mjs'
+import { listVod, vodCategories, vodSources, detailVod } from './vod.mjs'
 import { getWatermark, updateWatermark } from './watermark.mjs'
 import { getMarquee, updateMarquee } from './marquee.mjs'
 import {
@@ -355,6 +355,7 @@ app.post('/api/admin/marquee/update', superAdminMiddleware, wrap(updateMarquee))
 
 // 影视系统（电影/电视剧/综艺/动漫，公开拉取）
 app.get('/api/vod/categories', wrap(vodCategories))
+app.get('/api/vod/sources', wrap(vodSources))
 app.get('/api/vod/list', wrap(listVod))
 app.get('/api/vod/detail', wrap(detailVod))
 // HLS 分片反向代理（供稳定源 m3u8 内的分片/密钥使用）

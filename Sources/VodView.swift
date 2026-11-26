@@ -44,6 +44,37 @@ struct VodView: View {
                 .padding(.horizontal, 12)
                 .padding(.vertical, 8)
 
+                // 线路切换：自动 / 各资源站
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        Text("线路").font(.caption).foregroundColor(.white.opacity(0.5))
+                        Button {
+                            Task { await store.switchSource("") }
+                        } label: {
+                            Text("自动")
+                                .font(.system(size: 12, weight: store.source.isEmpty ? .semibold : .regular))
+                                .foregroundColor(store.source.isEmpty ? .black : .white.opacity(0.7))
+                                .padding(.horizontal, 12).padding(.vertical, 5)
+                                .background(Capsule().fill(store.source.isEmpty ? Color.orange : Color.white.opacity(0.12)))
+                        }
+                        .buttonStyle(.plain)
+                        ForEach(store.sources) { s in
+                            Button {
+                                Task { await store.switchSource(s.name) }
+                            } label: {
+                                Text(s.label)
+                                    .font(.system(size: 12, weight: store.source == s.name ? .semibold : .regular))
+                                    .foregroundColor(store.source == s.name ? .black : .white.opacity(0.7))
+                                    .padding(.horizontal, 12).padding(.vertical, 5)
+                                    .background(Capsule().fill(store.source == s.name ? Color.orange : Color.white.opacity(0.12)))
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+
                 Group {
                     if store.loading && store.items.isEmpty {
                         VStack(spacing: 12) {
@@ -186,6 +217,7 @@ struct VodSearchView: View {
     @State private var searching = false
     @State private var searched = false
     @State private var err: String?
+    @FocusState private var fieldFocused: Bool
 
     var body: some View {
         NavigationView {
@@ -196,11 +228,14 @@ struct VodSearchView: View {
                         TextField("搜索电影 / 电视剧 / 演员", text: $text)
                             .foregroundColor(.white)
                             .submitLabel(.search)
-                            .onSubmit { doSearch() }
+                            .focused($fieldFocused)
+                            .onSubmit { fieldFocused = false; doSearch() }
                     }
                     .padding(.horizontal, 12).padding(.vertical, 9)
                     .background(Color.white.opacity(0.1), in: RoundedRectangle(cornerRadius: 10))
-                    Button("搜索") { doSearch() }.foregroundColor(.orange)
+                    Button { fieldFocused = false; doSearch() } label: {
+                        Text("搜索").foregroundColor(.orange)
+                    }
                 }
                 .padding(12)
 
@@ -247,7 +282,7 @@ struct VodSearchView: View {
         searching = true; err = nil; searched = true; results = []
         Task {
             do {
-                let list = try await Api.vodList(cat: "all", page: 1, keyword: kw)
+                let list = try await Api.vodList(cat: "all", page: 1, keyword: kw, source: VodStore.shared.source)
                 results = list.items
             } catch let e {
                 err = "搜索失败：\(e.localizedDescription)"
@@ -264,6 +299,14 @@ final class VodStore: ObservableObject {
     static let shared = VodStore()
     @Published var categories: [Api.VodCategory] = []
     @Published var category = "movie"
+    @Published var sources: [Api.VodSource] = []
+    // 当前线路；空字符串=自动（服务端按可用性挑第一个）。记住用户选择。
+    @Published var source: String = {
+        let s = UserDefaults.standard.string(forKey: "vodSource") ?? ""
+        return s  // 空=自动
+    }() {
+        didSet { UserDefaults.standard.set(source, forKey: "vodSource") }
+    }
     @Published var items: [Api.VodItem] = []
     @Published var page = 1
     @Published var pagecount = 1
@@ -276,6 +319,15 @@ final class VodStore: ObservableObject {
     func loadCategories() async {
         do { categories = try await Api.vodCategories() }
         catch { /* 分类失败不影响主流程 */ }
+        do { sources = try await Api.vodSources() }
+        catch { /* 线路列表失败不影响主流程 */ }
+    }
+
+    /// 切换线路并重新加载
+    func switchSource(_ key: String) async {
+        guard key != source else { return }
+        source = key
+        await reload()
     }
 
     func switchCategory(_ key: String) async {
@@ -288,7 +340,7 @@ final class VodStore: ObservableObject {
         loading = true; error = nil
         defer { loading = false }
         do {
-            let list = try await Api.vodList(cat: category, page: 1)
+            let list = try await Api.vodList(cat: category, page: 1, source: source)
             items = list.items
             page = list.page ?? 1
             pagecount = list.pagecount ?? 1
@@ -303,7 +355,7 @@ final class VodStore: ObservableObject {
         defer { loadingMore = false }
         do {
             let next = page + 1
-            let list = try await Api.vodList(cat: category, page: next)
+            let list = try await Api.vodList(cat: category, page: next, source: source)
             // 去重追加
             var seen = Set(items.map { $0.id })
             for it in list.items where !seen.contains(it.id) {

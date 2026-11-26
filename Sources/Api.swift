@@ -439,10 +439,22 @@ enum Api {
         return (try await get("/api/vod/categories") as R).categories
     }
 
+    struct VodSource: Decodable, Identifiable {
+        let name: String
+        let label: String
+        var id: String { name }
+    }
+    /// 可选影视线路
+    static func vodSources() async throws -> [VodSource] {
+        struct R: Decodable { let sources: [VodSource] }
+        return (try await get("/api/vod/sources") as R).sources
+    }
+
     /// 影视列表/搜索。cat: movie/tv/variety/anime/all；wd 非空时为搜索
-    static func vodList(cat: String, page: Int, keyword: String = "") async throws -> VodList {
+    static func vodList(cat: String, page: Int, keyword: String = "", source: String = "") async throws -> VodList {
         var q: [String: String] = ["cat": cat, "pg": String(page)]
         if !keyword.isEmpty { q["wd"] = keyword }
+        if !source.isEmpty { q["source"] = source }
         return try await get("/api/vod/list", query: q)
     }
 

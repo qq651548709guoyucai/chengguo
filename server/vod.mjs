@@ -1,5 +1,5 @@
 // 影视（电影/电视剧/综艺/动漫）API 代理
-// 数据源：苹果CMS VOD API（无尽资源主源 + 红牛资源备源）
+// 数据源：6 个苹果CMS VOD 资源站，App 端可切换线路；默认自动按可用性回退。
 // 版权提示：这些站聚合全网资源，版权状态不明，仅限个人/小范围自用。
 
 // 内置内存缓存（与 server.mjs 的同款逻辑，避免跨模块耦合）
@@ -13,24 +13,41 @@ function cached(key, ttlMs, producer) {
   })
 }
 
+// 6 个苹果CMS资源站（2026-11-26 实测列表+详情+m3u8均可用）。
+// types: name->id 映射，用于把 App 的"电影/电视剧"等 tab 翻译成该站的分类 ID。
 const SOURCES = [
-  { name: 'wj', base: 'https://api.wujinapi.com/api.php/provide/vod/at/json' },
-  { name: 'hn', base: 'https://www.hongniuzy2.com/api.php/provide/vod/at/json' },
+  { name: 'wj',  label: '无尽', base: 'https://api.wujinapi.com/api.php/provide/vod/at/json',
+    types: { 剧情片:'11', 爱情片:'8', 犯罪片:'34', 国产剧:'13', 韩国剧:'22', 日本剧:'23', 美国剧:'16', 海外剧:'24',
+             大陆综艺:'25', 日韩综艺:'26', 港台综艺:'27', 欧美综艺:'28', 国产动漫:'29', 日韩动漫:'30', 漫剧:'63' } },
+  { name: 'hn',  label: '红牛', base: 'https://www.hongniuzy2.com/api.php/provide/vod/at/json',
+    types: { 国产剧:'12', 港澳剧:'13', 韩剧:'18', 欧美剧:'15', 大陆综艺:'39', 中国动漫:'36', 日本动漫:'37', 欧美动漫:'38', 现代都市:'44' } },
+  { name: 'bd',  label: '百度', base: 'https://api.apibdzy.com/api.php/provide/vod/at/json',
+    types: { 大陆剧:'13', 欧美剧:'14', 韩剧:'15', 日剧:'16', 泰剧:'19', 大陆综艺:'25', 日韩综艺:'26', 港台综艺:'27', 欧美综艺:'28', 国产动漫:'29', 日韩动漫:'30' } },
+  { name: 'gs',  label: '光速', base: 'https://api.guangsuapi.com/api.php/provide/vod/at/json',
+    types: { 剧情片:'10', 动作片:'6', 恐怖片:'11', 战争片:'12', 大陆剧:'13', 欧美剧:'14', 港澳剧:'15', 韩剧:'16', 日剧:'21',
+             大陆综艺:'37', 日韩综艺:'38', 中国动漫:'41', 日本动漫:'42', 欧美动漫:'43', 现代都市:'45' } },
+  { name: 'jy',  label: '金鹰', base: 'https://jyzyapi.com/api.php/provide/vod/at/json',
+    types: { 剧情片:'14', 动作片:'9', 恐怖片:'13', 战争片:'15', 内地剧:'20', 香港剧:'4', 欧美剧:'3', 韩剧:'5', 日剧:'6',
+             大陆综艺:'36', 日韩综艺:'37', 中国动漫:'24', 日本动漫:'25', 欧美动漫:'26', 现代都市:'41' } },
+  { name: 'js',  label: '极速', base: 'https://jszyapi.com/api.php/provide/vod/at/json',
+    types: { 剧情片:'14', 伦理片:'8', 内地剧:'20', 欧美剧:'3', 韩剧:'5', 日剧:'6', 大陆综艺:'30', 日韩综艺:'31', 港台综艺:'32', 中国动漫:'24', 现代都市:'46', AI漫剧:'54' } },
 ]
 
-// 分类映射（统一成 App 端 5 个 tab）
-// wj: 7喜剧片 11剧情片 13国产剧 15台湾剧 16美国剧 22韩国剧 23日本剧 24海外剧 25大陆综艺 26日韩综艺 27港台综艺 28欧美综艺 29国产动漫 30日韩动漫 37泰剧
-// hn: 12国产剧 14日剧 15欧美剧 21伦理片 36中国动漫 42欧美综艺 ...
+// App 端 6 个 tab。每个分类给一组候选类型名，按优先级在各源里找匹配（找不到就整站 list=全部）。
 const CATEGORIES = [
-  { key: 'movie',   label: '电影',     wj: '11', hn: '21' },
-  { key: 'tv',      label: '电视剧',   wj: '13', hn: '12' },
-  { key: 'variety', label: '综艺',     wj: '25', hn: '42' },
-  { key: 'anime',   label: '动漫',     wj: '29', hn: '36' },
-  // 短剧（竖屏爽剧，稳定源）：无尽 59=现代都市(1.2万+部)，红牛 44=现代都市(1.6万+部)。
-  // 走苹果CMS 稳定源，不依赖红果逆向接口，彻底规避短剧播放反复失效。
-  { key: 'short',   label: '短剧',     wj: '59', hn: '44' },
-  { key: 'all',     label: '全部',     wj: '',   hn: '' },
+  { key: 'movie',   label: '电影',   names: ['剧情片','动作片','爱情片','犯罪片','恐怖片','战争片','动漫电影'] },
+  { key: 'tv',      label: '电视剧', names: ['国产剧','大陆剧','内地剧','港澳剧','香港剧','韩剧','日剧','欧美剧','美国剧','海外剧'] },
+  { key: 'variety', label: '综艺',   names: ['大陆综艺','日韩综艺','港台综艺','欧美综艺'] },
+  { key: 'anime',   label: '动漫',   names: ['国产动漫','中国动漫','日韩动漫','日本动漫','欧美动漫'] },
+  { key: 'short',   label: '短剧',   names: ['现代都市','漫剧','AI漫剧'] },
+  { key: 'all',     label: '全部',   names: [] },
 ]
+
+// 给定源+分类，算出该站的类型 ID（第一个匹配到的候选名）
+function typeIdFor(source, conf) {
+  for (const n of conf.names) if (source.types[n]) return source.types[n]
+  return ''   // 无匹配 → 该站全部
+}
 
 async function fetchText(url) {
   const ctrl = new AbortController()
@@ -87,17 +104,25 @@ async function resolveM3U8(masterUrl) {
   })
 }
 
-// 依次尝试各数据源，首个成功的返回
-async function trySources(buildPath) {
+// 依次尝试数据源，首个成功的返回。prefer=指定源优先（失败仍回退其他源）。
+async function trySources(buildPath, prefer) {
+  const order = prefer
+    ? SOURCES.filter((s) => s.name === prefer).concat(SOURCES.filter((s) => s.name !== prefer))
+    : SOURCES
   let lastErr
-  for (const s of SOURCES) {
+  for (const s of order) {
     try {
       const data = await fetchJSON(s.base + buildPath(s))
-      if (data && data.code === 1) return { source: s.name, data }
+      if (data && data.code === 1 && Array.isArray(data.list)) return { source: s.name, data }
       lastErr = new Error('源返回异常: ' + (data && data.msg))
     } catch (e) { lastErr = e }
   }
   throw lastErr || new Error('所有数据源不可用')
+}
+
+// 供 App 展示可选线路
+export function vodSources(req, res) {
+  res.json({ sources: SOURCES.map(({ name, label }) => ({ name, label })) })
 }
 
 function normalizeItem(it, source) {
@@ -137,19 +162,21 @@ export async function listVod(req, res) {
   const cat = (req.query.cat || 'all').toString()
   const pg = Math.max(1, parseInt(req.query.pg || '1', 10) || 1)
   const wd = (req.query.wd || '').toString().trim()
+  // 指定线路；为空=自动（按 SOURCES 顺序挑第一个可用）
+  const prefer = (req.query.source || '').toString().trim()
   const conf = CATEGORIES.find((c) => c.key === cat) || CATEGORIES[CATEGORIES.length - 1]
-  const ck = `vod:${wd ? 's:' + wd : cat}:${pg}`
+  const ck = `vod:${prefer || 'auto'}:${wd ? 's:' + wd : cat}:${pg}`
 
   const result = await cached(ck, 10 * 60 * 1000, async () => {
     const { source, data } = await trySources((s) => {
-      let p = `?ac=${wd ? 'list' : 'list'}&pg=${pg}`
+      let p = `?ac=list&pg=${pg}`
       if (wd) p += `&wd=${encodeURIComponent(wd)}`
       else {
-        const tid = s.name === 'hn' ? conf.hn : conf.wj
+        const tid = typeIdFor(s, conf)
         if (tid) p += `&t=${tid}`
       }
       return p
-    })
+    }, prefer)
     // 注意：资源站列表接口 ac=list 不返回 vod_pic（封面）等详情字段，
     // 需用详情接口 ac=detail&ids=... 批量补全，否则列表页封面全空。
     let detailMap = {}
