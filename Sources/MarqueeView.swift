@@ -48,8 +48,8 @@ private struct MarqueeScroller: View {
                 let textW = approxWidth(config.text, font) + 40
                 let total = max(w + textW, 1)
                 let traveled = CGFloat(config.speed * ctx.date.timeIntervalSince(started))
-                // 从屏幕右侧外进入，滚到左侧完全消失后循环
-                let x = w - traveled.truncatingRemainder(dividingBy: total)
+                // 起始即贴右边缘可见（+textW），随后向左滚；不用等文字从屏幕外飘进来
+                let x = w - (traveled + textW).truncatingRemainder(dividingBy: total)
                 Text(config.text)
                     .font(.system(size: font, weight: .semibold))
                     .foregroundColor(Color(hex: config.fontColor) ?? .white)

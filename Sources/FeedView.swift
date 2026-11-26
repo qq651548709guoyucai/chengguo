@@ -531,6 +531,8 @@ struct FeedCard: View {
                         startPoint: .top, endPoint: .bottom
                     )
                 )
+                // 跑马灯紧跟在信息条下方，独立浮层不会被信息条盖住
+                MarqueeView()
                 Spacer()
             }
 

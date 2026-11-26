@@ -41,14 +41,6 @@ struct TencentPlayerView: View {
                 Color.black.ignoresSafeArea()
             }
 
-            // 跑马灯：常驻画面顶部，文字/颜色/字号/速度由后台配置
-            VStack {
-                MarqueeView()
-                    .padding(.top, 6)
-                Spacer()
-            }
-            .allowsHitTesting(false)
-
             // 中央大播放按钮（暂停时）
             if model.player != nil && !model.isPlaying {
                 Button { model.togglePlay() } label: {
