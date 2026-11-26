@@ -405,17 +405,9 @@ struct FeedCard: View {
 
     var body: some View {
         ZStack {
-            if let player = model.player {
-                VideoPlayer(player: player)
+            if model.player != nil {
+                TencentPlayerView(model: model)
                     .ignoresSafeArea()
-                    .overlay {
-                        if let st = model.statusText {
-                            VStack(spacing: 8) {
-                                ProgressView().tint(.white)
-                                Text(st).font(.footnote).foregroundColor(.white.opacity(0.8))
-                            }
-                        }
-                    }
             } else {
                 // 封面
                 AsyncImage(url: URL(string: drama.coverUrl)) { img in
@@ -620,21 +612,6 @@ struct FeedCard: View {
         } message: {
             Text("游客可免费试看前2集，登录后解锁全部剧集并同步收藏与进度。")
         }
-        .highPriorityGesture(
-            DragGesture(minimumDistance: 60)
-                .onEnded { value in
-                    let dy = value.translation.height
-                    // 垂直滑动且位移足够才切集（上滑下一集，下滑上一集）
-                    guard abs(dy) > 80, abs(dy) > abs(value.translation.width) else { return }
-                    Task {
-                        if dy < 0 {
-                            await model.nextEpisode()
-                        } else {
-                            await model.prevEpisode()
-                        }
-                    }
-                }
-        )
         .onDisappear { model.pause() }
         .onAppear { model.resume() }
         .task {
@@ -685,6 +662,16 @@ final class CardModel: ObservableObject {
         let saved = UserDefaults.standard.string(forKey: "cg_quality") ?? ""
         return ["1080p", "720p", "480p"].contains(saved) ? saved : "1080p"
     }()
+
+    // MARK: 腾讯视频式播放器状态
+    @Published var isPlaying = false
+    @Published var currentSeconds: Double = 0
+    @Published var totalSeconds: Double = 0
+    @Published var speed: Float = UserDefaults.standard.float(forKey: "cg_speed") == 0
+        ? 1.0 : UserDefaults.standard.float(forKey: "cg_speed")
+    @Published var fullScreen = false
+    @Published var showControls = true
+    private var hideControlsTask: Task<Void, Never>?
 
     /// 游客免费试看前2集；登录用户解锁全部
     private var isGuest: Bool { !LibraryStore.shared.isLoggedIn }
@@ -751,14 +738,78 @@ final class CardModel: ObservableObject {
         }
     }
 
-    func resume() { if started { player?.play() } }
+    func resume() {
+        if started {
+            player?.play()
+            player?.rate = speed
+            isPlaying = true
+        }
+    }
     func pause() {
         // 修复 L3：在 MainActor 上下文内清理 timeObserver 与 player，
         // 避免 deinit 里访问 @MainActor 属性触发 Swift 5.9 严格并发编译错误。
+        isPlaying = false
+        hideControlsTask?.cancel()
         if let t = timeObserver { player?.removeTimeObserver(t) }
         timeObserver = nil
         player?.pause()
         saveProgressIfNeeded()   // 退出页面时落盘当前进度
+    }
+
+    // MARK: - 腾讯视频式播放控制
+
+    /// 播放/暂停切换
+    func togglePlay() {
+        guard let player else { return }
+        if player.timeControlStatus == .playing {
+            player.pause()
+            isPlaying = false
+            showControls = true          // 暂停时常驻控件
+        } else {
+            player.play()
+            isPlaying = true
+            flashControls()
+        }
+    }
+
+    /// 跳转（拖动进度条）
+    func seek(to seconds: Double) {
+        guard let player, totalSeconds > 0 else { return }
+        let t = CMTime(seconds: max(0, min(seconds, totalSeconds)), preferredTimescale: 600)
+        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+        currentSeconds = t.seconds
+    }
+
+    /// 快进/快退 delta 秒（正=前进，负=后退）
+    func skip(_ delta: Double) {
+        seek(to: currentSeconds + delta)
+    }
+
+    /// 倍速
+    func setSpeed(_ s: Float) {
+        speed = s
+        UserDefaults.standard.set(s, forKey: "cg_speed")
+        player?.rate = s
+        if player?.timeControlStatus == .playing { isPlaying = true }
+    }
+
+    /// 全屏切换
+    func toggleFullScreen() {
+        fullScreen.toggle()
+        VodOrientation.lock(fullScreen ? .landscapeRight : .portrait)
+    }
+
+    /// 闪一下控件，播放中 5 秒后自动隐藏
+    func flashControls() {
+        showControls = true
+        hideControlsTask?.cancel()
+        hideControlsTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            guard let self, !Task.isCancelled else { return }
+            if self.player?.timeControlStatus == .playing {
+                self.showControls = false
+            }
+        }
     }
 
     /// 边界提示 1.5 秒后自动消失
@@ -879,6 +930,9 @@ final class CardModel: ObservableObject {
         // 切到新集，进度归零，等待新 item 的观察者重新填充
         lastSeconds = 0
         lastDuration = 0
+        currentSeconds = 0
+        totalSeconds = 0
+        isPlaying = false
         let ep = episodes[index]
         currentTitle = ep.title
         currentIndex = index
@@ -980,9 +1034,13 @@ final class CardModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.lastSeconds = time.seconds
+                self.currentSeconds = time.seconds
                 if let dur = newPlayer.currentItem?.duration, dur.isValid, dur.seconds.isFinite {
                     self.lastDuration = dur.seconds
+                    self.totalSeconds = dur.seconds
                 }
+                // 播放中同步真实状态（系统可能自行暂停/恢复，如来电、切后台）
+                self.isPlaying = newPlayer.timeControlStatus == .playing
             }
         }
 
@@ -990,7 +1048,12 @@ final class CardModel: ObservableObject {
         if let seekTo, seekTo > 0 {
             let t = CMTime(seconds: seekTo, preferredTimescale: 600)
             newPlayer.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
+            self.currentSeconds = seekTo
         }
         newPlayer.play()
+        newPlayer.rate = speed
+        isPlaying = true
+        showControls = true
+        flashControls()
     }
 }
