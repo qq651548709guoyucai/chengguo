@@ -228,8 +228,9 @@ final class LibraryStore: ObservableObject {
         } catch {
             // 修复 M5：token 真失效时先尝试静默重登，成功后重新校验同步。
             if let apiError = error as? ApiError, apiError.isUnauthorized,
-               await reLoginSilently() {
-                await verifyAndSync(attempt: attempt)
+               attempt < 3, await reLoginSilently() {
+                // 必须递增 attempt：若新 token 仍被判 401，用相同值递归会无限重登
+                await verifyAndSync(attempt: attempt + 1)
                 return
             }
             // 网络错误 / 服务端故障：保留本地登录态，用户照常进主界面用本地数据。

@@ -322,6 +322,7 @@ struct VodDetailView: View {
     let initialEpisode: Int
     @Environment(\.dismiss) private var dismiss
     @State private var playingEpisode: Int?
+    @State private var playFromSelection = false   // 是否从选集入口进入（不续播，尊重所选集）
     @State private var showPlayer = false
     @State private var showEpisodes = false
 
@@ -375,6 +376,7 @@ struct VodDetailView: View {
                             // 播放按钮
                             Button {
                                 playingEpisode = initialEpisode
+                                playFromSelection = false
                                 showPlayer = true
                             } label: {
                                 HStack(spacing: 8) {
@@ -401,6 +403,7 @@ struct VodDetailView: View {
                                         ForEach(detail.episodes) { ep in
                                             Button {
                                                 playingEpisode = ep.index
+                                                playFromSelection = true
                                                 showPlayer = true
                                             } label: {
                                                 Text("\(ep.index + 1)")
@@ -446,7 +449,7 @@ struct VodDetailView: View {
                 }
             }
             .fullScreenCover(isPresented: $showPlayer) {
-                VodPlayerView(detail: detail, episodeIndex: playingEpisode ?? 0, onClose: { showPlayer = false })
+                VodPlayerView(detail: detail, episodeIndex: playingEpisode ?? 0, resume: !playFromSelection, onClose: { showPlayer = false })
             }
         }
         .navigationViewStyle(.stack)
@@ -458,6 +461,7 @@ struct VodDetailView: View {
 struct VodPlayerView: View {
     let detail: Api.VodDetail
     @State private var currentIndex: Int
+    let resume: Bool   // true=播放按钮进入(续播上次进度)；false=选集进入(播放用户所选集)
     let onClose: () -> Void
     @State private var player: AVPlayer?
     @State private var showEpisodes = false
@@ -468,10 +472,12 @@ struct VodPlayerView: View {
     @State private var isPlaying = true
     @State private var showSeekBar = true
     @State private var endObserver: NSObjectProtocol?
+    @State private var timeObserver: Any?
 
-    init(detail: Api.VodDetail, episodeIndex: Int, onClose: @escaping () -> Void) {
+    init(detail: Api.VodDetail, episodeIndex: Int, resume: Bool = true, onClose: @escaping () -> Void) {
         self.detail = detail
         self._currentIndex = State(initialValue: episodeIndex)
+        self.resume = resume
         self.onClose = onClose
     }
 
@@ -607,8 +613,9 @@ struct VodPlayerView: View {
         }
         .task {
             var start = currentIndex
-            // 断点续播：读取上次看到第几集
-            if let saved = UserDefaults.standard.object(forKey: progressKey) as? Int,
+            // 仅"播放按钮"入口续播；从选集进入时尊重用户所选集数，不被上次进度覆盖
+            if resume,
+               let saved = UserDefaults.standard.object(forKey: progressKey) as? Int,
                detail.episodes.indices.contains(saved) {
                 start = saved
             }
@@ -623,7 +630,9 @@ struct VodPlayerView: View {
                 NotificationCenter.default.removeObserver(obs)
                 endObserver = nil
             }
+            if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
             player?.pause()
+            player?.replaceCurrentItem(with: nil)
             player = nil
             // 退出播放器恢复竖屏
             if isFullscreen { VodOrientation.lock(.portrait) }
@@ -643,11 +652,18 @@ struct VodPlayerView: View {
         }
         loading = true
         player?.pause()
-        // 切集前移除旧的播放结束监听，避免累积
+        // 切集前移除旧的观察者，避免累积与串台
         if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
+        if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
         let newPlayer = AVPlayer(url: url)
         player = newPlayer
         isPlaying = true
+        // 同步真实播放状态：来电/切后台致系统暂停后，中央播放键要正确出现
+        timeObserver = newPlayer.addPeriodicTimeObserver(
+            forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
+        ) { [weak newPlayer] _ in
+            if let p = newPlayer { self.isPlaying = p.timeControlStatus == .playing }
+        }
         newPlayer.play()
         loading = false
         // 播放结束自动下一集（无需 weak：self 为值类型，@State 包装器保证状态可更新）

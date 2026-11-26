@@ -272,6 +272,9 @@ function isGuestLocked(req, epId) {
 // 命中缓存直接返回，不再求红果；已解密的视频流本身也有独立缓存。
 const PLAY_CACHE_DIR = path.join(__dirname, 'playcache')
 fs.mkdirSync(PLAY_CACHE_DIR, { recursive: true })
+// 校验集 id：只允许字母数字下划线连字符，防止 %2F 解码后的路径穿越
+// （如 ..%2F..%2Fdata%2Fwatermark 会把缓存写到配置目录覆盖文件）
+const safeEpId = (id) => typeof id === 'string' && /^[A-Za-z0-9_-]+$/.test(id)
 const playCachePath = (epId) => path.join(PLAY_CACHE_DIR, `p_${epId}.json`)
 
 async function runPlayCached(epId) {
@@ -299,7 +302,11 @@ const wrap = (fn) => async (req, res) => {
     const out = await fn(req, res)
     if (out !== undefined && !res.headersSent) res.json(out)
   }
-  catch (e) { res.status(502).json({ error: String(e && e.message || e).slice(0, 300) }) }
+  catch (e) {
+    // 响应头已发出（流式接口）时不能再写 status/json，否则二次抛错导致进程崩溃
+    if (res.headersSent) { res.destroy(); return }
+    res.status(502).json({ error: String(e && e.message || e).slice(0, 300) })
+  }
 }
 
 // ---------- 账号系统路由 ----------
@@ -393,6 +400,7 @@ app.get('/api/episodes/:seriesId', wrap(async (req) => {
   return page
 }))
 app.get('/api/play/:episodeId', wrap(async (req, res) => {
+  if (!safeEpId(req.params.episodeId)) return res.status(400).json({ error: '无效的集 ID' })
   if (isGuestLocked(req, req.params.episodeId)) {
     res.status(403).json({ error: '登录后解锁全部剧集（游客免费试看前2集）', locked: true })
     return
@@ -407,6 +415,7 @@ app.get('/api/play/:episodeId', wrap(async (req, res) => {
 
 app.get('/api/stream/:episodeId', wrap(async (req, res) => {
   const epId = req.params.episodeId
+  if (!safeEpId(epId)) return res.status(400).json({ error: '无效的集 ID' })
   if (isGuestLocked(req, epId)) {
     res.status(403).json({ error: '登录后解锁全部剧集（游客免费试看前2集）', locked: true })
     return
@@ -420,7 +429,9 @@ app.get('/api/stream/:episodeId', wrap(async (req, res) => {
     return
   }
   // 默认最高画质 1080p；可用 ?q= 指定。缓存按画质分开，避免旧低清缓存串味。
-  const quality = (req.query.q || '1080p').toString()
+  // 画质只允许字母数字，防止 ?q=..%2F.. 之类的路径穿越
+  let quality = (req.query.q || '1080p').toString()
+  if (!/^[A-Za-z0-9_-]+$/.test(quality)) quality = '1080p'
   const cacheFile = path.join(CACHE_DIR, `cg_${epId}_${quality}.mp4`)
 
   if (!fs.existsSync(cacheFile)) {

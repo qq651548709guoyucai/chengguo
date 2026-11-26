@@ -711,6 +711,23 @@ final class CardModel: ObservableObject {
         saveProgressIfNeeded()   // 退出页面时落盘当前进度
     }
 
+    /// 彻底释放播放器：先摘掉 timeObserver 与通知，再置 nil。
+    /// timeObserver 闭包强捕获 player，AVPlayer 又强持有 observer token，
+    /// 只写 `player = nil` 无法打破这个循环，旧 player（含缓冲）会永久泄漏。
+    private func releasePlayer() {
+        if let t = timeObserver { player?.removeTimeObserver(t) }
+        timeObserver = nil
+        if let o = endObserver { NotificationCenter.default.removeObserver(o) }
+        endObserver = nil
+        if let o = playerErrorObserver { NotificationCenter.default.removeObserver(o) }
+        playerErrorObserver = nil
+        isSeeking = false
+        player?.pause()
+        player?.rate = 0
+        player?.replaceCurrentItem(with: nil)
+        player = nil
+    }
+
     // MARK: - 腾讯视频式播放控制
 
     /// 播放/暂停切换
@@ -738,10 +755,13 @@ final class CardModel: ObservableObject {
         isSeeking = true
         currentSeconds = clamped
         player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
-            guard let self, finished else { return }
             Task { @MainActor in
-                // 用播放器落地后的真实时间校正，避免显示值与画面不一致
-                self.currentSeconds = player.currentTime().seconds
+                guard let self else { return }
+                // 无论 seek 是否成功落地都必须解锁：被连续拖动/切集打断时 finished=false，
+                // 若在此处 return，isSeeking 会永久卡在 true，进度条再也不更新。
+                if finished {
+                    self.currentSeconds = player.currentTime().seconds
+                }
                 self.isSeeking = false
             }
         }
@@ -898,6 +918,8 @@ final class CardModel: ObservableObject {
         // 避免等待新播放地址的空档里旧集继续出声，造成两路音频重叠
         player?.pause()
         // 切到新集，进度归零，等待新 item 的观察者重新填充
+        // 同时解锁 seek：若上一集有被打断的 seek，isSeeking 可能还卡在 true
+        isSeeking = false
         lastSeconds = 0
         lastDuration = 0
         currentSeconds = 0
@@ -948,7 +970,7 @@ final class CardModel: ObservableObject {
             ) { [weak self] note in
                 Task { @MainActor in
                     let err = (note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error)
-                    self?.player = nil
+                    self?.releasePlayer()
                     self?.errorMessage = "播放出错：\(err?.localizedDescription ?? "未知错误")"
                 }
             }
@@ -968,7 +990,7 @@ final class CardModel: ObservableObject {
             // 当前集播起来后，后台预热下一集的取址与解密缓存，切集时秒开
             preloadNext()
         } catch {
-            player = nil
+            releasePlayer()
             statusText = nil
             let msg = error.localizedDescription
             if msg.contains("502") || msg.contains("500") {
