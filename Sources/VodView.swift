@@ -8,10 +8,22 @@ struct VodView: View {
     @State private var searchText = ""
     @State private var showSearch = false
     @State private var selectedDetail: Api.VodDetail?
-    @State private var showDetail = false
     @State private var selectedEpisode = 0
+    @State private var detailError: String?
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
+
+    /// 点剧集封面：拉详情并打开选集页。失败时给出可见提示，杜绝静默黑屏。
+    private func openDetail(id: String, source: String) async {
+        do {
+            let d = try await Api.vodDetail(id: id, source: source)
+            detailError = nil
+            selectedEpisode = 0
+            selectedDetail = d
+        } catch {
+            detailError = "详情加载失败：\(error.localizedDescription)"
+        }
+    }
 
     var body: some View {
         NavigationView {
@@ -75,6 +87,20 @@ struct VodView: View {
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
 
+                // 详情加载失败提示（可见，不再静默黑屏）
+                if let err = detailError {
+                    HStack(spacing: 8) {
+                        Image(systemName: "exclamationmark.triangle.fill").foregroundColor(.orange)
+                        Text(err).font(.caption).foregroundColor(.white.opacity(0.85))
+                        Spacer()
+                        Button { detailError = nil } label: {
+                            Image(systemName: "xmark").foregroundColor(.white.opacity(0.6))
+                        }
+                    }
+                    .padding(.horizontal, 12).padding(.vertical, 8)
+                    .background(Color.orange.opacity(0.15))
+                }
+
                 Group {
                     if store.loading && store.items.isEmpty {
                         VStack(spacing: 12) {
@@ -106,13 +132,7 @@ struct VodView: View {
                             LazyVGrid(columns: columns, spacing: 14) {
                                 ForEach(store.items) { item in
                                     Button {
-                                        Task {
-                                            if let d = try? await Api.vodDetail(id: item.id, source: item.source ?? "") {
-                                                selectedDetail = d
-                                                selectedEpisode = 0
-                                                showDetail = true
-                                            }
-                                        }
+                                        Task { await openDetail(id: item.id, source: item.source ?? "") }
                                     } label: {
                                         VodPosterCell(item: item)
                                     }
@@ -147,19 +167,14 @@ struct VodView: View {
             .sheet(isPresented: $showSearch) {
                 VodSearchView { item in
                     showSearch = false
-                    Task {
-                        if let d = try? await Api.vodDetail(id: item.id, source: item.source ?? "") {
-                            selectedDetail = d
-                            selectedEpisode = 0
-                            showDetail = true
-                        }
-                    }
+                    Task { await openDetail(id: item.id, source: item.source ?? "") }
                 }
             }
-            .fullScreenCover(isPresented: $showDetail) {
-                if let detail = selectedDetail {
-                    VodDetailView(detail: detail, initialEpisode: selectedEpisode)
-                }
+            // 用 item 绑定：selectedDetail 有值才弹出，且 detail 直接作为参数传入，
+            // 杜绝 isPresented + if let 在弹出瞬间 detail 尚未同步导致的空视图黑屏。
+            .fullScreenCover(item: $selectedDetail) { detail in
+                VodDetailView(detail: detail, initialEpisode: selectedEpisode)
+                    .onDisappear { selectedDetail = nil }
             }
         }
         .navigationViewStyle(.stack)

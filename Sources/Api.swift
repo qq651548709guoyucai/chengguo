@@ -417,7 +417,7 @@ enum Api {
         let index: Int
         var id: Int { index }
     }
-    struct VodDetail: Decodable {
+    struct VodDetail: Decodable, Identifiable {
         let id: String
         let source: String?
         let title: String
