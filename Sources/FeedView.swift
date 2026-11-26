@@ -229,6 +229,26 @@ struct SearchView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
 
+            // 数据源切换：全部 / 红果 / 苹果CMS
+            HStack(spacing: 6) {
+                Text("搜索源")
+                    .font(.caption)
+                    .foregroundColor(.white.opacity(0.5))
+                Picker("", selection: $store.searchSource) {
+                    Text("全部").tag("all")
+                    Text("红果").tag("hg")
+                    Text("苹果CMS").tag("cms")
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: store.searchSource) { _ in
+                    // 切换数据源后，若已有搜索词则立即用新源重搜
+                    let kw = store.searchText.trimmingCharacters(in: .whitespaces)
+                    if !kw.isEmpty { Task { await store.search(kw) } }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.bottom, 6)
+
             // 红果联想词下拉（有输入且未提交搜索时显示）
             if !suggestions.isEmpty && !store.hasSearched {
                 ScrollView(.horizontal, showsIndicators: false) {

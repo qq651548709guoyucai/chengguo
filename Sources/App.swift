@@ -35,6 +35,13 @@ final class DramaStore: ObservableObject {
     @Published var searchText = ""
     @Published var searchError: String?
     @Published var hasSearched = false
+    // 搜索数据源：all=红果+苹果CMS / hg=红果 / cms=苹果CMS（记住选择）
+    @Published var searchSource: String = {
+        let s = UserDefaults.standard.string(forKey: "searchSource") ?? "all"
+        return ["all", "hg", "cms"].contains(s) ? s : "all"
+    }() {
+        didSet { UserDefaults.standard.set(searchSource, forKey: "searchSource") }
+    }
 
     // 热搜
     @Published var hotWords: [String] = []
@@ -85,7 +92,7 @@ final class DramaStore: ObservableObject {
         hasSearched = true
         searchError = nil
         do {
-            searchItems = try await Api.search(kw).items
+            searchItems = try await Api.search(kw, source: searchSource).items
             if searchItems.isEmpty { searchError = "没有搜到「\(kw)」，换个关键词试试" }
         } catch {
             searchError = "搜索失败：\(error.localizedDescription)"

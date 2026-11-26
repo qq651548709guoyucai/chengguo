@@ -383,14 +383,22 @@ app.get('/api/feed', wrap(async (req) => {
 app.get('/api/search', wrap(async (req) => {
   const q = (req.query.q || '').toString().trim()
   if (!q) return { items: [], cursor: '', hasMore: false }
-  return cached(`mix:search:${q}`, 30 * 60 * 1000, async () => {
-    // 搜索双源：红果 + 苹果CMS 并行，两个都要。
-    // 用 allSettled：任一源失败不影响另一路；两个都失败才报错。
-    // 红果 id 是纯数字，苹果CMS 是 vod_ 前缀，天然不冲突，按 id 去重即可；
-    // 保留各自前缀，App 点进去时 episodes 会自动分流到对应数据源。
+  // 用户可自选数据源：hg=红果 / cms=苹果CMS / all=双源合并(默认，兼容旧版App)
+  const raw = (req.query.source || 'all').toString()
+  const source = ['hg', 'cms', 'all'].includes(raw) ? raw : 'all'
+  return cached(`search:${source}:${q}`, 30 * 60 * 1000, async () => {
+    // 用 allSettled：单源模式下另一路失败也不影响；双源都失败才报错。
+    // 红果 id 纯数字、苹果CMS 是 vod_ 前缀，天然不冲突，按 id 去重；
+    // 保留各自前缀，App 点进去时 episodes 自动分流到对应数据源。
+    const jobs = {
+      hg: () => runWorker({ op: 'search', q }),
+      cms: () => stableSearch(q),
+    }
+    const wantHg = source === 'hg' || source === 'all'
+    const wantCms = source === 'cms' || source === 'all'
     const [hg, cms] = await Promise.allSettled([
-      runWorker({ op: 'search', q }),
-      stableSearch(q),
+      wantHg ? jobs.hg() : Promise.resolve(null),
+      wantCms ? jobs.cms() : Promise.resolve(null),
     ])
     const items = []
     const seen = new Set()
@@ -403,8 +411,11 @@ app.get('/api/search', wrap(async (req) => {
     }
     if (hg.status === 'fulfilled') push(hg.value && hg.value.items)
     if (cms.status === 'fulfilled') push(cms.value && cms.value.items)
-    if (hg.status === 'rejected' && cms.status === 'rejected') {
-      throw new Error('搜索双源均不可用: ' + String(hg.reason).slice(0, 80))
+    const anyWanted = (wantHg && hg.status === 'fulfilled') || (wantCms && cms.status === 'fulfilled')
+    if (!anyWanted) {
+      const reason = (wantHg && hg.status === 'rejected' && hg.reason) ||
+                     (wantCms && cms.status === 'rejected' && cms.reason) || '不可用'
+      throw new Error('搜索源均不可用: ' + String(reason).slice(0, 80))
     }
     return { items, cursor: '', hasMore: false }
   })

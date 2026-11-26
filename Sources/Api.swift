@@ -206,8 +206,8 @@ enum Api {
         try await get("/api/feed", query: ["type": type])
     }
 
-    static func search(_ q: String) async throws -> SeriesPage {
-        try await get("/api/search", query: ["q": q])
+    static func search(_ q: String, source: String = "all") async throws -> SeriesPage {
+        try await get("/api/search", query: ["q": q, "source": source])
     }
 
     static func hotWords() async throws -> [String] {
