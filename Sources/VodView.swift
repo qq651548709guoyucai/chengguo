@@ -195,13 +195,18 @@ struct VodPosterCell: View {
             }
             Text(item.title)
                 .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white).lineLimit(2)
-                .frame(height: 34, alignment: .top)
+                .foregroundColor(.white)
+                .lineLimit(2)
+                .multilineTextAlignment(.leading)
+                // 必须限定 maxWidth，否则文字按理想宽度溢出列宽、与相邻格子重叠
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .top)
             let year = item.year ?? ""
             let typeName = item.typeName ?? ""
             if !year.isEmpty || !typeName.isEmpty {
                 Text([year, typeName].filter { !$0.isEmpty }.joined(separator: " · "))
-                    .font(.caption2).foregroundColor(.white.opacity(0.5)).lineLimit(1)
+                    .font(.caption2).foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
     }

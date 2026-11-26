@@ -99,7 +99,8 @@ struct PosterCell: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white)
                 .lineLimit(2)
-                .frame(height: 34, alignment: .top)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .top)
 
             if drama.episodeCount > 0 {
                 Text("全 \(drama.episodeCount) 集")
@@ -159,7 +160,8 @@ struct HotDramaCell: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(.white)
                 .lineLimit(2)
-                .frame(height: 34, alignment: .top)
+                .multilineTextAlignment(.leading)
+                .frame(maxWidth: .infinity, minHeight: 34, alignment: .top)
 
             if !hot.description.isEmpty {
                 Text(hot.description)
