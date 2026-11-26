@@ -521,6 +521,16 @@ struct VodDetailView: View {
 
 // MARK: - 影视播放器（AVPlayer 直接播 m3u8，上下滑切集）
 
+// 加载状态：KVO 回调写入。用引用类型避免闭包捕获 SwiftUI View 值类型造成引用循环。
+private final class VodLoadState: ObservableObject {
+    enum Phase {
+        case loading
+        case ready
+        case failed(String)
+    }
+    @Published var phase: Phase = .loading
+}
+
 struct VodPlayerView: View {
     let detail: Api.VodDetail
     @State private var currentIndex: Int
@@ -530,7 +540,11 @@ struct VodPlayerView: View {
     @State private var showEpisodes = false
     @State private var showControls = false
     @State private var tip: String?
-    @State private var loading = false
+    @StateObject private var loadState = VodLoadState()
+    @State private var itemObserver: NSKeyValueObservation?
+    @State private var failObserver: NSObjectProtocol?
+    @State private var currentEpisodes: [Api.VodEpisode] = []
+    @State private var triedSources: Set<String> = []
     @State private var isFullscreen = false
     @State private var isPlaying = true
     @State private var showSeekBar = true
@@ -540,8 +554,17 @@ struct VodPlayerView: View {
     init(detail: Api.VodDetail, episodeIndex: Int, resume: Bool = true, onClose: @escaping () -> Void) {
         self.detail = detail
         self._currentIndex = State(initialValue: episodeIndex)
+        self._currentEpisodes = State(initialValue: detail.episodes)
+        var tried: Set<String> = []
+        if let s = detail.source, !s.isEmpty { tried.insert(s) }
+        self._triedSources = State(initialValue: tried)
         self.resume = resume
         self.onClose = onClose
+    }
+
+    private var isFailed: Bool {
+        if case .failed = loadState.phase { return true }
+        return false
     }
 
     private var progressKey: String { "vod_progress_\(detail.source ?? "")_\(detail.id)" }
@@ -574,12 +597,39 @@ struct VodPlayerView: View {
                     .ignoresSafeArea()
                     .contentShape(Rectangle())
                     .onTapGesture { togglePlay() }
-            } else if loading {
-                ProgressView().tint(.orange).scaleEffect(1.4)
             }
 
-            // 中间播放/暂停按钮（暂停时显示）
-            if let player, !isPlaying {
+            // 加载中：显示转圈，避免加密流首帧解码期间纯黑屏以为坏了
+            if case .loading = loadState.phase {
+                VStack(spacing: 12) {
+                    ProgressView().tint(.orange).scaleEffect(1.4)
+                    Text("正在加载，请稍候…").font(.caption).foregroundColor(.white.opacity(0.7))
+                }
+            }
+
+            // 加载失败：显示原因 + 重试，不再无限黑屏
+            if case .failed(let msg) = loadState.phase {
+                VStack(spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 42)).foregroundColor(.white.opacity(0.5))
+                    Text(msg).font(.subheadline).foregroundColor(.white.opacity(0.8))
+                        .multilineTextAlignment(.center).padding(.horizontal, 30)
+                    HStack(spacing: 14) {
+                        Button { retryCurrent() } label: {
+                            Text("重试").font(.subheadline.bold()).foregroundColor(.white)
+                                .padding(.horizontal, 22).padding(.vertical, 8)
+                                .background(Color.white.opacity(0.18), in: Capsule())
+                        }
+                        Button { triedSources.removeAll(); tryNextSource() } label: {
+                            Text("换线路").font(.subheadline.bold()).foregroundColor(.white)
+                                .padding(.horizontal, 22).padding(.vertical, 8)
+                                .background(Color.orange, in: Capsule())
+                        }
+                    }
+                }
+            }
+
+            // 中间播放/暂停按钮（暂停时显示；加载失败时隐藏避免与错误提示重叠）
+            if let player, !isPlaying, !isFailed {
                 Button { togglePlay() } label: {
                     Image(systemName: "play.fill")
                         .font(.system(size: 42))
@@ -668,6 +718,13 @@ struct VodPlayerView: View {
                 if dy < 0 { play(index: currentIndex + 1) } else { play(index: currentIndex - 1) }
             }
         )
+        // 加载失败自动换线路：常驻监听，视图重建也不漏；无候选线路时不再触发避免死循环
+        .onReceive(loadState.$phase) { phase in
+            if case .failed = phase {
+                let remaining = ["hn", "wj", "bd", "gs", "jy", "js"].filter { !triedSources.contains($0) }
+                if !remaining.isEmpty { tryNextSource() }
+            }
+        }
         .sheet(isPresented: $showEpisodes) {
             VodEpisodeSheet(detail: detail, currentIndex: currentIndex) { idx in
                 showEpisodes = false
@@ -693,8 +750,14 @@ struct VodPlayerView: View {
                 NotificationCenter.default.removeObserver(obs)
                 endObserver = nil
             }
+            if let obs = failObserver {
+                NotificationCenter.default.removeObserver(obs)
+                failObserver = nil
+            }
+            itemObserver?.invalidate(); itemObserver = nil
             if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
             player?.pause()
+            player?.rate = 0
             player?.replaceCurrentItem(with: nil)
             player = nil
             // 退出播放器恢复竖屏
@@ -702,25 +765,62 @@ struct VodPlayerView: View {
         }
     }
 
-    private func play(index: Int) {
-        guard detail.episodes.indices.contains(index) else {
+    /// 用指定集数与线路构建播放器：带 KVO 加载状态 + 失败自动换线路
+    private func play(index: Int, source: String? = nil) {
+        let eps = currentEpisodes
+        guard eps.indices.contains(index) else {
             showTip(index > currentIndex ? "已经是最后一集了" : "已经是第一集了")
             return
         }
         currentIndex = index
         UserDefaults.standard.set(index, forKey: progressKey)
-        let urlString = detail.episodes[index].url
+        let urlString = eps[index].url
         guard let url = URL(string: urlString) else {
-            showTip("播放地址无效"); return
+            loadState.phase = .failed("播放地址无效")
+            return
         }
-        loading = true
-        player?.pause()
-        // 切集前移除旧的观察者，避免累积与串台
-        if let obs = endObserver { NotificationCenter.default.removeObserver(obs) }
+
+        // 切集/重试前彻底清理旧观察者与旧播放器，避免累积和串台
+        if let obs = endObserver { NotificationCenter.default.removeObserver(obs); endObserver = nil }
+        if let obs = failObserver { NotificationCenter.default.removeObserver(obs); failObserver = nil }
         if let t = timeObserver { player?.removeTimeObserver(t); timeObserver = nil }
+        itemObserver?.invalidate(); itemObserver = nil
+        player?.pause()
+        player?.rate = 0
+        player?.replaceCurrentItem(with: nil)
+
+        loadState.phase = .loading
+        isPlaying = true
         let newPlayer = AVPlayer(url: url)
         player = newPlayer
-        isPlaying = true
+
+        // 关键：监听 item.status，只有真正 readyToPlay 才撤掉加载转圈；
+        // 加密流首帧解码慢或失败时不再纯黑屏。KVO 闭包捕获引用类型的 loadState，不捕获 View。
+        let state = loadState
+        itemObserver = newPlayer.currentItem?.observe(\.status, options: [.initial, .new]) { item, _ in
+            DispatchQueue.main.async {
+                switch item.status {
+                case .readyToPlay:
+                    if case .loading = state.phase { state.phase = .ready }
+                case .failed:
+                    state.phase = .failed(item.error?.localizedDescription ?? "播放失败，可点重试或切换线路")
+                case .unknown:
+                    break
+                @unknown default:
+                    break
+                }
+            }
+        }
+
+        // 解码中途失败（如分片 403/网络中断）也给出提示，而不是一直黑屏
+        failObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemFailedToPlayToEndTime,
+            object: newPlayer.currentItem, queue: .main
+        ) { note in
+            let err = note.userInfo?[AVPlayerItemFailedToPlayToEndTimeErrorKey] as? Error
+            state.phase = .failed("播放出错：\(err?.localizedDescription ?? "可切换线路重试")")
+        }
+
         // 同步真实播放状态：来电/切后台致系统暂停后，中央播放键要正确出现
         timeObserver = newPlayer.addPeriodicTimeObserver(
             forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main
@@ -728,17 +828,60 @@ struct VodPlayerView: View {
             if let p = newPlayer { self.isPlaying = p.timeControlStatus == .playing }
         }
         newPlayer.play()
-        loading = false
-        // 播放结束自动下一集（无需 weak：self 为值类型，@State 包装器保证状态可更新）
+
+        // 播放结束自动下一集
         endObserver = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: newPlayer.currentItem, queue: .main
         ) { _ in
-            if index < detail.episodes.count - 1 {
-                self.play(index: index + 1)
+            if index < self.currentEpisodes.count - 1 { self.play(index: index + 1) }
+        }
+        showTip(eps.count > 1 ? "第 \(index + 1) 集" : eps[index].title)
+    }
+
+    /// 点「重试」：重新拉当前线路当前集
+    private func retryCurrent() {
+        loadState.phase = .loading
+        Task {
+            do {
+                let src = detail.source ?? "hn"
+                let fresh = try await Api.vodDetail(id: detail.id, source: src)
+                await MainActor.run {
+                    self.currentEpisodes = fresh.episodes
+                    self.play(index: self.currentIndex, source: src)
+                }
+            } catch {
+                await MainActor.run { self.loadState.phase = .failed("重试失败：\(error.localizedDescription)") }
             }
         }
-        showTip(detail.episodes.count > 1 ? "第 \(index + 1) 集" : detail.episodes[index].title)
+    }
+
+    /// 当前线路加载失败时自动尝试其它线路
+    private func tryNextSource() {
+        let all = ["hn", "wj", "bd", "gs", "jy", "js"]
+        guard let next = all.first(where: { !triedSources.contains($0) }) else {
+            loadState.phase = .failed("所有线路均无法播放，请稍后再试")
+            return
+        }
+        triedSources.insert(next)
+        loadState.phase = .loading
+        Task {
+            do {
+                let fresh = try await Api.vodDetail(id: detail.id, source: next)
+                guard !fresh.episodes.isEmpty else {
+                    await MainActor.run { self.tryNextSource() }
+                    return
+                }
+                await MainActor.run {
+                    self.currentEpisodes = fresh.episodes
+                    let idx = min(self.currentIndex, fresh.episodes.count - 1)
+                    self.play(index: idx, source: next)
+                    self.showTip("已切换线路，正在加载")
+                }
+            } catch {
+                await MainActor.run { self.tryNextSource() }
+            }
+        }
     }
 
     private func showTip(_ text: String) {
