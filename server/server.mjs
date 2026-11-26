@@ -383,8 +383,31 @@ app.get('/api/feed', wrap(async (req) => {
 app.get('/api/search', wrap(async (req) => {
   const q = (req.query.q || '').toString().trim()
   if (!q) return { items: [], cursor: '', hasMore: false }
-  if (STABLE_FEED) return cached(`sf:search:${q}`, 30 * 60 * 1000, () => stableSearch(q))
-  return cached(`search:${q}`, 30 * 60 * 1000, () => runWorker({ op: 'search', q }))
+  return cached(`mix:search:${q}`, 30 * 60 * 1000, async () => {
+    // 搜索双源：红果 + 苹果CMS 并行，两个都要。
+    // 用 allSettled：任一源失败不影响另一路；两个都失败才报错。
+    // 红果 id 是纯数字，苹果CMS 是 vod_ 前缀，天然不冲突，按 id 去重即可；
+    // 保留各自前缀，App 点进去时 episodes 会自动分流到对应数据源。
+    const [hg, cms] = await Promise.allSettled([
+      runWorker({ op: 'search', q }),
+      stableSearch(q),
+    ])
+    const items = []
+    const seen = new Set()
+    const push = (list) => {
+      for (const it of (list || [])) {
+        if (!it || !it.id || seen.has(it.id)) continue
+        seen.add(it.id)
+        items.push(it)
+      }
+    }
+    if (hg.status === 'fulfilled') push(hg.value && hg.value.items)
+    if (cms.status === 'fulfilled') push(cms.value && cms.value.items)
+    if (hg.status === 'rejected' && cms.status === 'rejected') {
+      throw new Error('搜索双源均不可用: ' + String(hg.reason).slice(0, 80))
+    }
+    return { items, cursor: '', hasMore: false }
+  })
 }))
 app.get('/api/hot', wrap(() => {
   if (HG_FEED) return cached('hg:hot', 30 * 60 * 1000, () => runWorker({ op: 'hot' }))
