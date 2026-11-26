@@ -566,7 +566,7 @@ async function saveMarquee() {
     fontSize: Number(document.getElementById('mqSize').value) || 15,
     fontColor: document.getElementById('mqColor').value.trim() || '#ffffff',
     background: document.getElementById('mqBg').value.trim() || '#000000',
-    opacity: isNaN(op) ? 0.55 : op,
+    opacity: isNaN(op) ? 0 : op,
   }
   if (!body.text) { msg('mqMsg', '文字不能为空', false); return }
   try {

@@ -15,7 +15,7 @@ final class MarqueeStore: ObservableObject {
         fontSize: 15,
         fontColor: "#ffffff",
         background: "#000000",
-        opacity: 0.55
+        opacity: 0
     )
 
     private var didLoad = false

@@ -45,14 +45,21 @@ export function updateMarquee(req, res) {
   const text = (b.text ?? db.text).toString().trim().replace(/[\r\n]+/g, ' ')
   if (text.length > 80) return res.status(400).json({ error: '文字最多 80 字' })
   const isColor = v => /^#[0-9a-fA-F]{6}$/.test(v || '') || /^[a-zA-Z]+$/.test(v || '')
+  // 注意：不能用 `Number(v) || fallback`，因为 0 是合法值（透明度 0 = 全透明）却是 falsy，
+  // 会被错误回退成旧值。这里用 nullish 判断，允许 0 正常保存。
+  const num = (v, fallback, lo, hi) => {
+    if (v === undefined || v === null || v === '') return fallback
+    const n = Number(v)
+    return Number.isFinite(n) ? Math.min(hi, Math.max(lo, n)) : fallback
+  }
   db = {
     enabled: b.enabled === undefined ? db.enabled : !!b.enabled,
     text,
-    speed: Math.min(300, Math.max(10, Number(b.speed) || db.speed)),
-    fontSize: Math.min(32, Math.max(10, Number(b.fontSize) || db.fontSize)),
+    speed: num(b.speed, db.speed, 10, 300),
+    fontSize: num(b.fontSize, db.fontSize, 10, 32),
     fontColor: isColor(b.fontColor) ? b.fontColor : db.fontColor,
     background: isColor(b.background) ? b.background : db.background,
-    opacity: Math.min(1, Math.max(0, Number(b.opacity) || db.opacity)),
+    opacity: num(b.opacity, db.opacity, 0, 1),
   }
   save()
   return { ok: true, ...db }
