@@ -53,7 +53,7 @@ struct CommentsView: View {
                 // 输入区
                 if replyTo != nil {
                     HStack(spacing: 6) {
-                        Text("回复 @\(replyTo!.username)").font(.caption).foregroundColor(.orange)
+                        Text("回复 @\(replyTo!.displayName)").font(.caption).foregroundColor(.orange)
                         Spacer()
                         Button { replyTo = nil } label: {
                             Image(systemName: "xmark.circle.fill").foregroundColor(.white.opacity(0.4))
@@ -112,9 +112,14 @@ struct CommentsView: View {
     private func commentRow(_ c: Api.Comment, isReply: Bool) -> some View {
         HStack(alignment: .top, spacing: 10) {
             if isReply { Image(systemName: "arrow.turn.down.right").font(.caption).foregroundColor(.white.opacity(0.3)) }
+            // 用户头像（emoji）
+            ZStack {
+                Circle().fill(Color.orange.opacity(0.18)).frame(width: 34, height: 34)
+                Text(c.avatarEmoji).font(.system(size: 19))
+            }
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Text(c.username).font(.subheadline.bold()).foregroundColor(.orange)
+                    Text(c.displayName).font(.subheadline.bold()).foregroundColor(.orange)
                     if c.role == "admin" {
                         Text("管理员").font(.caption2).foregroundColor(.white)
                             .padding(.horizontal, 5).padding(.vertical, 1)

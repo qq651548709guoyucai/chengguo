@@ -432,11 +432,22 @@ enum Api {
         let seriesTitle: String
         let userId: String
         let username: String
+        let nickname: String?   // 名号（服务端关联实时资料，老评论可能缺）
+        let avatar: String?     // 头像 emoji
         let role: String
         let text: String
         let parentId: String?
         let replyTo: String?
         let createdAt: Double
+
+        var displayName: String {
+            let n = (nickname ?? "").trimmingCharacters(in: .whitespaces)
+            return n.isEmpty ? username : n
+        }
+        var avatarEmoji: String {
+            let a = (avatar ?? "").trimmingCharacters(in: .whitespaces)
+            return a.isEmpty ? "🙂" : a
+        }
     }
 
     /// 拉取某部剧的评论（需登录）

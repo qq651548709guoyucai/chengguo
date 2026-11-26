@@ -3,6 +3,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { publicUserById } from './auth.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, 'data')
@@ -16,33 +17,29 @@ try {
 if (!db.comments) db.comments = []
 
 let saveTimer = null
-function writeNow() {
-  const tmp = COMMENTS_FILE + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2))
-  fs.renameSync(tmp, COMMENTS_FILE)
-}
 function save() {
   if (saveTimer) return
   saveTimer = setTimeout(() => {
     saveTimer = null
-    try { writeNow() } catch (e) { console.error('保存评论失败:', e.message) }
+    try {
+      const tmp = COMMENTS_FILE + '.tmp'
+      fs.writeFileSync(tmp, JSON.stringify(db, null, 2))
+      fs.renameSync(tmp, COMMENTS_FILE)
+    } catch (e) { console.error('保存评论失败:', e.message) }
   }, 200)
 }
-// 修复 L1：退出时强制刷盘，避免 200ms 窗口内丢评论
-process.on('exit', () => {
-  if (!saveTimer) return
-  clearTimeout(saveTimer)
-  saveTimer = null
-  try { writeNow() } catch (e) { console.error('退出刷盘失败:', e.message) }
-})
 
 function pub(c) {
+  // 关联用户实时资料：改名号/头像后评论区同步更新；用户不存在则回退评论里的旧 username
+  const u = publicUserById(c.userId)
   return {
     id: c.id,
     seriesId: c.seriesId,
     seriesTitle: c.seriesTitle || '',
     userId: c.userId,
     username: c.username,
+    nickname: u?.nickname || c.username || '',
+    avatar: u?.avatar || '🙂',
     role: c.role || 'user',
     text: c.text,
     parentId: c.parentId || null,
@@ -64,7 +61,11 @@ export function postComment(req, res) {
   let replyTo = null
   if (parentId) {
     const parent = db.comments.find((c) => c.id === parentId)
-    if (parent) replyTo = parent.username
+    if (parent) {
+      // 回复对象显示实时名号（找不到则回退旧 username）
+      const pu = publicUserById(parent.userId)
+      replyTo = pu?.nickname || parent.username
+    }
   }
 
   const c = {
@@ -92,22 +93,6 @@ export function listComments(req, res) {
   res.json({ comments: list.map(pub) })
 }
 
-// 修复 L2：递归收集所有子孙 id，避免删主评论后留下孤儿孙回复
-function collectDescendantIds(id) {
-  const ids = new Set([id])
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const c of db.comments) {
-      if (c.parentId && ids.has(c.parentId) && !ids.has(c.id)) {
-        ids.add(c.id)
-        changed = true
-      }
-    }
-  }
-  return ids
-}
-
 // 删除评论：本人或管理员
 export function deleteComment(req, res) {
   const id = (req.body?.id || '').toString().trim()
@@ -115,8 +100,7 @@ export function deleteComment(req, res) {
   if (!c) return res.status(404).json({ error: '评论不存在' })
   const isAdmin = req.user.role === 'admin'
   if (!isAdmin && c.userId !== req.user.id) return res.status(403).json({ error: '只能删除自己的评论' })
-  const ids = collectDescendantIds(id)
-  db.comments = db.comments.filter((x) => !ids.has(x.id))
+  db.comments = db.comments.filter((x) => x.id !== id && x.parentId !== id)  // 连同其回复一起删
   save()
   res.json({ ok: true })
 }
@@ -132,8 +116,7 @@ export function adminDeleteComment(req, res) {
   const id = (req.body?.id || '').toString().trim()
   const c = db.comments.find((x) => x.id === id)
   if (!c) return res.status(404).json({ error: '评论不存在' })
-  const ids = collectDescendantIds(id)
-  db.comments = db.comments.filter((x) => !ids.has(x.id))
+  db.comments = db.comments.filter((x) => x.id !== id && x.parentId !== id)
   save()
   res.json({ ok: true })
 }

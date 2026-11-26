@@ -104,6 +104,12 @@ function findByToken(token) {
   return db.users.find((u) => u.token === token && !u.disabled) || null
 }
 
+// 按用户 id 取公开资料（供评论区等模块关联显示实时名号/头像）
+export function publicUserById(id) {
+  const u = db.users.find((x) => x.id === id)
+  return u ? publicUser(u) : null
+}
+
 // ---------- 对外接口 ----------
 
 export function authMiddleware(req, res, next) {
