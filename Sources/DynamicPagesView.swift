@@ -323,9 +323,10 @@ struct DynamicPagesView: View {
                 error = nil
                 loading = false
             }
-        } catch {
+        } catch let err {
+            let msg = "配置加载失败：\(err.localizedDescription)"
             await MainActor.run {
-                if pages.isEmpty { error = "配置加载失败：\(error.localizedDescription)" }
+                if pages.isEmpty { error = msg }
                 loading = false
             }
         }
