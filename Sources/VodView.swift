@@ -91,6 +91,16 @@ struct VodView: View {
                                     .padding(.horizontal, 22).padding(.vertical, 9).background(Color.orange, in: Capsule())
                             }
                         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else if store.items.isEmpty {
+                        // 兜底：无数据且非加载/非错误时也要给提示，避免纯黑屏
+                        VStack(spacing: 14) {
+                            Image(systemName: "film.stack").font(.system(size: 40)).foregroundColor(.white.opacity(0.4))
+                            Text("暂无影视内容").font(.footnote).foregroundColor(.white.opacity(0.6))
+                            Button { Task { await store.reload() } } label: {
+                                Text("重新加载").font(.subheadline.bold()).foregroundColor(.white)
+                                    .padding(.horizontal, 22).padding(.vertical, 8).background(Color.orange, in: Capsule())
+                            }
+                        }.frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
                         ScrollView {
                             LazyVGrid(columns: columns, spacing: 14) {
@@ -390,21 +400,22 @@ struct VodDetailView: View {
     @State private var showEpisodes = false
 
     var body: some View {
-        NavigationView {
-            ZStack {
-                Color.black.ignoresSafeArea()
-                if detail.episodes.isEmpty {
-                    VStack(spacing: 14) {
-                        Image(systemName: "exclamationmark.triangle").font(.system(size: 44)).foregroundColor(.white.opacity(0.4))
-                        Text("该片暂无可用播放源").foregroundColor(.white.opacity(0.7))
-                        Button { dismiss() } label: {
-                            Text("返回").foregroundColor(.white).padding(.horizontal, 24).padding(.vertical, 9)
-                                .background(Color.orange, in: Capsule())
-                        }
+        // 关键：fullScreenCover 内不再嵌套 NavigationView（SwiftUI 已知渲染坑，
+        // 弹出瞬间内容 view 高度可能为 0 导致整页纯黑）。改用纯 ZStack + 自定义顶栏。
+        ZStack {
+            Color.black.ignoresSafeArea()
+            if detail.episodes.isEmpty {
+                VStack(spacing: 14) {
+                    Image(systemName: "exclamationmark.triangle").font(.system(size: 44)).foregroundColor(.white.opacity(0.4))
+                    Text("该片暂无可用播放源").foregroundColor(.white.opacity(0.7))
+                    Button { dismiss() } label: {
+                        Text("返回").foregroundColor(.white).padding(.horizontal, 24).padding(.vertical, 9)
+                            .background(Color.orange, in: Capsule())
                     }
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 14) {
+                }
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
                             // 顶部：封面 + 标题 + 元信息
                             HStack(alignment: .top, spacing: 14) {
                                 AsyncImage(url: URL(string: detail.cover ?? "")) { phase in
@@ -501,23 +512,31 @@ struct VodDetailView: View {
                             }
                         }
                         .padding(16)
+                        .padding(.top, 46)   // 给自定义顶栏留位置
                     }
                 }
-            }
-            .navigationTitle(detail.title)
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("完成") { dismiss() }
+                // 自定义顶栏（不再依赖 NavigationView）：只占自身高度，不拦截下方滚动
+                VStack {
+                    HStack {
+                        Button { dismiss() } label: {
+                            Image(systemName: "chevron.left").font(.system(size: 20, weight: .semibold))
+                                .foregroundColor(.white).padding(8).background(Color.black.opacity(0.5), in: Circle())
+                        }
+                        Spacer()
+                        Text(detail.title).font(.subheadline.bold()).foregroundColor(.white).lineLimit(1)
+                        Spacer()
+                        Button("完成") { dismiss() }.foregroundColor(.orange)
+                    }
+                    .padding(.horizontal, 12).padding(.top, 8).padding(.bottom, 4)
+                    .background(Color.black.opacity(0.6))
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             }
             .fullScreenCover(isPresented: $showPlayer) {
                 VodPlayerView(detail: detail, episodeIndex: playingEpisode ?? 0, resume: !playFromSelection, onClose: { showPlayer = false })
             }
         }
-        .navigationViewStyle(.stack)
     }
-}
 
 // MARK: - 影视播放器（AVPlayer 直接播 m3u8，上下滑切集）
 
