@@ -622,6 +622,8 @@ final class CardModel: ObservableObject {
         ? 1.0 : UserDefaults.standard.float(forKey: "cg_speed")
     @Published var fullScreen = false
     @Published var showControls = true
+    /// seek 是异步的，跳转未落地前锁住进度，避免 periodic observer 把旧时间写回
+    @Published var isSeeking = false
     private var hideControlsTask: Task<Void, Never>?
 
     /// 游客免费试看前2集；登录用户解锁全部
@@ -724,16 +726,31 @@ final class CardModel: ObservableObject {
     }
 
     /// 跳转（拖动进度条）
+    /// 注意：seek 是异步的。以前直接写 currentSeconds 后，紧接着 periodic observer
+    /// 会把跳转前的旧时间写回，导致 skip 以错误的基准计算，表现为"快进/后退相反或错位"。
+    /// 现在用 completion 回读播放器真实时间，并在跳转期间锁住 UI 进度。
     func seek(to seconds: Double) {
         guard let player, totalSeconds > 0 else { return }
-        let t = CMTime(seconds: max(0, min(seconds, totalSeconds)), preferredTimescale: 600)
-        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero)
-        currentSeconds = t.seconds
+        let clamped = max(0, min(seconds, totalSeconds))
+        let t = CMTime(seconds: clamped, preferredTimescale: 600)
+        isSeeking = true
+        currentSeconds = clamped
+        player.seek(to: t, toleranceBefore: .zero, toleranceAfter: .zero) { [weak self] finished in
+            guard let self, finished else { return }
+            Task { @MainActor in
+                // 用播放器落地后的真实时间校正，避免显示值与画面不一致
+                self.currentSeconds = player.currentTime().seconds
+                self.isSeeking = false
+            }
+        }
     }
 
     /// 快进/快退 delta 秒（正=前进，负=后退）
+    /// 基准改为播放器当前真实时间，而不是可能被 observer 污染的 currentSeconds。
     func skip(_ delta: Double) {
-        seek(to: currentSeconds + delta)
+        guard let player else { return }
+        let base = player.currentTime().seconds
+        seek(to: (base.isFinite ? base : currentSeconds) + delta)
     }
 
     /// 倍速
@@ -985,7 +1002,8 @@ final class CardModel: ObservableObject {
             Task { @MainActor in
                 guard let self else { return }
                 self.lastSeconds = time.seconds
-                self.currentSeconds = time.seconds
+                // 跳转进行中不回写进度，否则会把刚设的目标时间覆盖回旧值
+                if !self.isSeeking { self.currentSeconds = time.seconds }
                 if let dur = newPlayer.currentItem?.duration, dur.isValid, dur.seconds.isFinite {
                     self.lastDuration = dur.seconds
                     self.totalSeconds = dur.seconds

@@ -106,19 +106,6 @@
       <div id="annMsg" class="msg"></div>
     </div>
 
-    <!-- 数据源设置（仅超级管理员可见） -->
-    <div id="feedModeCard" class="card" style="margin-top:18px">
-      <div class="row" style="justify-content:space-between; margin-bottom:6px">
-        <strong>短剧数据源</strong>
-        <span id="feedModeNow" class="tag">加载中…</span>
-      </div>
-      <div style="font-size:12px;color:#8b929c;margin-bottom:12px;line-height:1.6">
-        切换后立即生效，无需重启服务。红果官方API若在你服务器出口IP被风控，播放会黑屏，请切回稳定源。
-      </div>
-      <div id="feedModeList" class="row" style="gap:10px;flex-wrap:wrap;margin-bottom:10px"></div>
-      <div id="feedModeMsg" class="msg"></div>
-    </div>
-
     <!-- 去广告水印设置（仅超级管理员可见） -->
     <div id="wmCard" class="card" style="margin-top:18px">
       <div class="row" style="justify-content:space-between; margin-bottom:6px">
@@ -149,6 +136,55 @@
       </div>
       <button class="mini" onclick="saveWatermark()">保存水印设置</button>
       <div id="wmMsg" class="msg"></div>
+    </div>
+
+    <!-- 播放器跑马灯设置（仅超级管理员可见） -->
+    <div id="mqCard" class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px">
+        <strong>播放器跑马灯</strong>
+        <label style="font-size:12px;color:#8b929c;display:flex;align-items:center;gap:6px;cursor:pointer">
+          <input type="checkbox" id="mqEnabled" checked> 启用
+        </label>
+      </div>
+      <div style="font-size:12px;color:#8b929c;margin-bottom:12px;line-height:1.6">
+        播放画面顶部会循环滚动这行文字。保存后 App 下次打开播放器即可生效，无需重新转码。
+      </div>
+      <div style="margin-bottom:10px">
+        <div style="font-size:12px;color:#8b929c;margin-bottom:5px">滚动文字（最多 80 字）</div>
+        <input id="mqText" maxlength="80" placeholder="例如：熬夜看短剧 每晚更新"
+          style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+      </div>
+      <div class="row" style="gap:12px;margin-bottom:10px">
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">滚动速度（10-300）</div>
+          <input id="mqSpeed" type="number" min="10" max="300" value="60"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">字号（10-32）</div>
+          <input id="mqSize" type="number" min="10" max="32" value="15"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+      </div>
+      <div class="row" style="gap:12px;margin-bottom:12px">
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">文字颜色</div>
+          <input id="mqColor" value="#ffffff" placeholder="#ffffff / white"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">背景颜色</div>
+          <input id="mqBg" value="#000000" placeholder="#000000 / black"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+        <div style="flex:1">
+          <div style="font-size:12px;color:#8b929c;margin-bottom:5px">背景透明度（0-1）</div>
+          <input id="mqOpacity" type="number" min="0" max="1" step="0.05" value="0.55"
+            style="width:100%;background:#0f1115;border:1px solid #333a47;color:#fff;padding:10px 12px;border-radius:8px;font:inherit">
+        </div>
+      </div>
+      <button class="mini" onclick="saveMarquee()">保存跑马灯设置</button>
+      <div id="mqMsg" class="msg"></div>
     </div>
 
     <!-- 管理员管理（仅超级管理员可见） -->
@@ -281,18 +317,18 @@ function doLogout() {
   document.getElementById('loginView').classList.remove('hidden')
 }
 function applyPermissionUI() {
-  // 普通管理员隐藏：发布公告按钮、管理员管理卡片、水印设置、数据源设置
+  // 普通管理员隐藏：发布公告按钮、管理员管理卡片、水印设置、跑马灯设置
   document.getElementById('btnAddAnn').style.display = IS_SUPER ? '' : 'none'
   document.getElementById('adminMgrCard').style.display = IS_SUPER ? '' : 'none'
   document.getElementById('wmCard').style.display = IS_SUPER ? '' : 'none'
-  document.getElementById('feedModeCard').style.display = IS_SUPER ? '' : 'none'
+  document.getElementById('mqCard').style.display = IS_SUPER ? '' : 'none'
 }
 function showMain() {
   document.getElementById('loginView').classList.add('hidden')
   document.getElementById('mainView').classList.remove('hidden')
   applyPermissionUI()
   loadStats(); loadUsers(); loadComments(); loadAnnouncements()
-  if (IS_SUPER) { loadAdmins(); loadWatermark(); loadFeedMode() }
+  if (IS_SUPER) { loadAdmins(); loadWatermark(); loadMarquee() }
 }
 async function loadStats() {
   try {
@@ -507,28 +543,36 @@ async function saveWatermark() {
   } catch (e) { msg('wmMsg', e.message, false) }
 }
 
-// ---------- 数据源设置（热切换）----------
-let FEED_MODES = []
-async function loadFeedMode() {
+// ---------- 播放器跑马灯 ----------
+async function loadMarquee() {
   try {
-    const d = await api('/api/admin/feed-mode')
-    FEED_MODES = d.modes || []
-    const label = FEED_MODES.find(m => m.key === d.mode)?.label || d.mode
-    document.getElementById('feedModeNow').textContent = '当前：' + label
-    document.getElementById('feedModeList').innerHTML = FEED_MODES.map(m => `
-      <button class="mini" style="${m.key === d.mode ? 'border-color:#ff8c00;color:#ff8c00' : ''}"
-        onclick="setFeedMode('${m.key}')" title="${esc(m.desc)}">${esc(m.label)}</button>
-    `).join('')
-  } catch (e) { msg('feedModeMsg', e.message, false) }
+    const d = await api('/api/marquee')
+    document.getElementById('mqEnabled').checked = d.enabled !== false
+    document.getElementById('mqText').value = d.text || ''
+    document.getElementById('mqSpeed').value = d.speed || 60
+    document.getElementById('mqSize').value = d.fontSize || 15
+    document.getElementById('mqColor').value = d.fontColor || '#ffffff'
+    document.getElementById('mqBg').value = d.background || '#000000'
+    const op = parseFloat(d.opacity)
+    document.getElementById('mqOpacity').value = isNaN(op) ? 0.55 : op
+  } catch (e) { /* 拉取失败静默 */ }
 }
-async function setFeedMode(mode) {
-  const label = FEED_MODES.find(m => m.key === mode)?.label || mode
-  if (!await askConfirm(`确定切换到「${label}」？立即生效，无需重启。`)) return
+async function saveMarquee() {
+  const op = parseFloat(document.getElementById('mqOpacity').value)
+  const body = {
+    enabled: document.getElementById('mqEnabled').checked,
+    text: document.getElementById('mqText').value.trim(),
+    speed: Number(document.getElementById('mqSpeed').value) || 60,
+    fontSize: Number(document.getElementById('mqSize').value) || 15,
+    fontColor: document.getElementById('mqColor').value.trim() || '#ffffff',
+    background: document.getElementById('mqBg').value.trim() || '#000000',
+    opacity: isNaN(op) ? 0.55 : op,
+  }
+  if (!body.text) { msg('mqMsg', '文字不能为空', false); return }
   try {
-    await api('/api/admin/feed-mode', { method: 'POST', body: { mode } })
-    msg('feedModeMsg', `已切换到「${label}」，首页缓存已刷新`, true)
-    await loadFeedMode()
-  } catch (e) { msg('feedModeMsg', e.message, false) }
+    await api('/api/admin/marquee/update', { method: 'POST', body })
+    msg('mqMsg', '已保存，播放器下次打开时生效', true)
+  } catch (e) { msg('mqMsg', e.message, false) }
 }
 
 // ESC 关闭弹窗

@@ -84,6 +84,17 @@ struct PlayResult: Decodable {
     let contentKey: ContentKeyInfo?
 }
 
+// 播放器跑马灯配置（后台可配，公开读取）
+struct MarqueeConfig: Decodable {
+    let enabled: Bool
+    let text: String
+    let speed: Double
+    let fontSize: Double
+    let fontColor: String
+    let background: String
+    let opacity: Double
+}
+
 enum Api {
     // 2026-11-24：切换到自建阿里云服务器（Nginx 反代 80 -> 3002）
     static let base = "http://47.100.207.19"
@@ -437,5 +448,10 @@ enum Api {
 
     static func vodDetail(id: String, source: String) async throws -> VodDetail {
         try await get("/api/vod/detail", query: ["id": id, "source": source])
+    }
+
+    /// 播放器跑马灯配置
+    static func marquee() async throws -> MarqueeConfig {
+        try await get("/api/marquee")
     }
 }

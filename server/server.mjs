@@ -7,29 +7,11 @@
 //   GET /api/episodes/:seriesId        分集列表（?cursor= 翻页）
 //   GET /api/play/:episodeId           播放信息（含加密流的 key）
 //   GET /api/stream/:episodeId         解密后的 mp4 流（支持 Range，可 ?q=540p）
-// 读取同目录 .env 配置文件（Node 原生，无需 dotenv）：KEY=VALUE 每行一项，# 开头为注释。
-// 已有环境变量优先于 .env，方便命令行临时覆盖。
-import fs0 from 'node:fs'
-try {
-  const envPath = new URL('./.env', import.meta.url)
-  if (fs0.existsSync(envPath)) {
-    for (const line of fs0.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
-      const s = line.trim()
-      if (!s || s.startsWith('#')) continue
-      const i = s.indexOf('=')
-      if (i < 0) continue
-      const k = s.slice(0, i).trim()
-      const v = s.slice(i + 1).trim()
-      if (k && process.env[k] === undefined) process.env[k] = v
-    }
-    console.log('[config] 已加载 .env')
-  }
-} catch (e) { console.error('[config] 读取 .env 失败:', e.message) }
 import express from 'express'
 import {
   authMiddleware, adminMiddleware, superAdminMiddleware, register, login, me, changePassword,
   syncData, getData, adminListUsers, adminStats, adminToggleUser, adminDeleteUser,
-  adminListAdmins, adminCreateAdmin, adminPromoteUser, adminDemoteAdmin, isValidToken,
+  adminListAdmins, adminCreateAdmin, adminPromoteUser, adminDemoteAdmin,
 } from './auth.mjs'
 import { postComment, listComments, deleteComment, adminListComments, adminDeleteComment } from './comments.mjs'
 import {
@@ -38,6 +20,7 @@ import {
 } from './announcements.mjs'
 import { listVod, vodCategories, detailVod } from './vod.mjs'
 import { getWatermark, updateWatermark } from './watermark.mjs'
+import { getMarquee, updateMarquee } from './marquee.mjs'
 import {
   stableFeed, stableSearch, stableHot, stableEpisodes,
   stableM3U8Url, serveHLS, serveSegment,
@@ -274,24 +257,14 @@ function noteEpisodeOrder(items) {
   })
 }
 // 判断是否为「未登录且想看第3集及以后」。
-// 修复 H2：必须校验 token 真实有效才放行；失效/伪造 token 一律按游客处理。
-// App 端已有自动重登，token 失效时客户端会静默换 token 后重试，不会被误伤。
+// 带任意非空 token 一律放行（避免 token 失效的已登录用户被误伤；App 端已有自动重登）。
+// 仅当 epId 已知且序号>=2、且无 token 时拦截。
 function isGuestLocked(req, epId) {
   const token = (req.headers['x-token'] || req.query.token || '').toString().trim()
-  if (token && isValidToken(token)) return false   // 仅有效且未禁用的用户放行
-  if (epOrder.size === 0) return false             // 映射还没建立：放行，避免误伤前2集播放
+  if (token) return false                    // 带 token：一律放行（含失效 token，避免误伤）
+  if (epOrder.size === 0) return false       // 映射还没建立：放行，避免误伤前2集播放
   const order = epOrder.get(String(epId))
-  return order != null && order >= 2               // 第3集及以后且无有效 token：拦截
-}
-
-// 修复 H1：画质白名单 + epId 清洗，杜绝 path.join 路径遍历
-const QUALITY_WHITELIST = new Set(['360p', '480p', '540p', '720p', '1080p'])
-function safeQuality(q) {
-  const s = (q || '1080p').toString()
-  return QUALITY_WHITELIST.has(s) ? s : '1080p'
-}
-function safeEpId(raw) {
-  return String(raw ?? '').replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 128)
+  return order != null && order >= 2         // 明确是第3集及以后且无 token：拦截
 }
 
 // ---------- play 取址结果持久化缓存 ----------
@@ -299,15 +272,7 @@ function safeEpId(raw) {
 // 命中缓存直接返回，不再求红果；已解密的视频流本身也有独立缓存。
 const PLAY_CACHE_DIR = path.join(__dirname, 'playcache')
 fs.mkdirSync(PLAY_CACHE_DIR, { recursive: true })
-const playCachePath = (epId) => {
-  const safe = safeEpId(epId)
-  if (!safe) throw new Error('invalid episodeId')
-  const p = path.join(PLAY_CACHE_DIR, `p_${safe}.json`)
-  if (!path.resolve(p).startsWith(path.resolve(PLAY_CACHE_DIR) + path.sep)) {
-    throw new Error('invalid play cache path')
-  }
-  return p
-}
+const playCachePath = (epId) => path.join(PLAY_CACHE_DIR, `p_${epId}.json`)
 
 async function runPlayCached(epId) {
   const cf = playCachePath(epId)
@@ -377,34 +342,9 @@ app.post('/api/admin/watermark/update', superAdminMiddleware, wrap(async (req, r
   return result
 }))
 
-// ---------- 数据源设置（管理后台热切换，无需重启）----------
-app.get('/api/admin/feed-mode', superAdminMiddleware, wrap(() => ({
-  mode: feedState.mode,
-  modes: [
-    { key: 'stable', label: '苹果CMS稳定源', desc: '整部剧合成1个视频，稳定能播（推荐）' },
-    { key: 'hg', label: '红果官方API', desc: '榜单发现 + 真实分集，出口IP被风控时会黑屏' },
-    { key: 'legacy', label: '旧版 worker', desc: '早期红果 worker 逻辑' },
-  ],
-})))
-app.post('/api/admin/feed-mode', superAdminMiddleware, wrap(async (req, res) => {
-  const mode = (req.body?.mode || '').toString()
-  if (!['stable', 'hg', 'legacy'].includes(mode)) {
-    return res.status(400).json({ error: '无效的数据源模式' })
-  }
-  feedState.mode = mode
-  process.env.HG_FEED = mode === 'hg' ? '1' : '0'
-  process.env.STABLE_FEED = mode === 'legacy' ? '0' : '1'
-  persistFeedMode(mode)
-  // 清掉旧数据源的缓存，让切换立即生效
-  for (const k of [...memCache.keys()]) {
-    if (k.startsWith('sf:') || k.startsWith('hg:') || k.startsWith('feed:')
-        || k.startsWith('search:') || k.startsWith('hot:') || k.startsWith('ep:') || k.startsWith('series:')) {
-      memCache.delete(k)
-    }
-  }
-  console.log(`[admin] 数据源切换为 ${mode}`)
-  return { ok: true, mode }
-}))
+// 播放器跑马灯（公开拉取；修改仅超级管理员）
+app.get('/api/marquee', wrap(getMarquee))
+app.post('/api/admin/marquee/update', superAdminMiddleware, wrap(updateMarquee))
 
 // 影视系统（电影/电视剧/综艺/动漫，公开拉取）
 app.get('/api/vod/categories', wrap(vodCategories))
@@ -419,97 +359,29 @@ app.get('/api/vodseg', wrap(async (req, res) => {
 app.get('/admin', (req, res) => res.sendFile(path.join(__dirname, 'admin.html')))
 app.use('/static', express.static(path.join(__dirname, 'static')))
 
-// 首页短剧数据源开关（运行时可改，管理后台可调）：
-//   hg      → 红果官方 API（榜单发现 + 真实分集 + 红果取址），真·一集一集
-//   stable  → 苹果CMS稳定源（整部合成1个视频，绕开红果风控）【默认】
-//   legacy  → 老 worker 逻辑
-// 注意：红果取址（resolvePlayback）在部分出口 IP 会被 ANONYMOUS_LIMITED 风控，
-// 若切到 hg 后出现黑屏/取址失败，请在管理后台切回 stable。
-const ENV_PATH = new URL('./.env', import.meta.url)
-const feedState = {
-  mode: (process.env.HG_FEED ?? '0') === '1' ? 'hg'
-    : ((process.env.STABLE_FEED ?? '1') !== '0' ? 'stable' : 'legacy'),
-}
-// 把当前模式持久化回 .env，重启后保持
-function persistFeedMode(mode) {
-  try {
-    let text = fs0.existsSync(ENV_PATH) ? fs0.readFileSync(ENV_PATH, 'utf8') : ''
-    const setKey = (key, val) => {
-      const re = new RegExp(`^${key}=.*$`, 'm')
-      if (re.test(text)) text = text.replace(re, `${key}=${val}`)
-      else text = `${key}=${val}\n${text}`
-    }
-    setKey('HG_FEED', mode === 'hg' ? '1' : '0')
-    setKey('STABLE_FEED', mode === 'legacy' ? '0' : '1')
-    fs0.writeFileSync(ENV_PATH, text)
-  } catch (e) { console.error('[config] 持久化 .env 失败:', e.message) }
-}
-const getHG = () => feedState.mode === 'hg'
-const getStable = () => feedState.mode === 'stable'
+// 首页短剧数据源开关：STABLE_FEED=1（默认开启）走苹果CMS稳定源；
+// 设为 0 则回退红果 worker。稳定源绕开红果逆向接口失效导致的黑屏。
+const STABLE_FEED = (process.env.STABLE_FEED ?? '1') !== '0'
 
 app.get('/api/feed', wrap(async (req) => {
   const t = (req.query.type || 'real').toString()
-  if (getHG()) return cached(`hg:feed:${t}`, 30 * 60 * 1000, () => runWorker({ op: 'hgFeed' }))
-  if (getStable()) return cached(`sf:feed:${t}`, 30 * 60 * 1000, () => stableFeed(FEED_TYPES.includes(t) ? t : 'real'))
+  if (STABLE_FEED) return cached(`sf:feed:${t}`, 30 * 60 * 1000, () => stableFeed(FEED_TYPES.includes(t) ? t : 'real'))
   return getFeed(FEED_TYPES.includes(t) ? t : 'real')
 }))
 app.get('/api/search', wrap(async (req) => {
   const q = (req.query.q || '').toString().trim()
   if (!q) return { items: [], cursor: '', hasMore: false }
-  if (getStable()) return cached(`sf:search:${q}`, 30 * 60 * 1000, () => stableSearch(q))
+  if (STABLE_FEED) return cached(`sf:search:${q}`, 30 * 60 * 1000, () => stableSearch(q))
   return cached(`search:${q}`, 30 * 60 * 1000, () => runWorker({ op: 'search', q }))
 }))
 app.get('/api/hot', wrap(() => {
-  if (getStable()) return cached('sf:hot', 30 * 60 * 1000, () => stableHot())
+  if (STABLE_FEED) return cached('sf:hot', 30 * 60 * 1000, () => stableHot())
   return cached('hot', 30 * 60 * 1000, () => runWorker({ op: 'hot' }))
-}))
-
-// ===== 红果官方 API 扩展（SDK 已封装的能力，直连红果 fqnovel.com）=====
-// 搜索联想词
-app.get('/api/suggest', wrap((req) => {
-  const prefix = (req.query.prefix || req.query.q || '').toString().trim()
-  if (!prefix) return { items: [] }
-  return cached(`suggest:${prefix}`, 24 * 60 * 60 * 1000,
-    () => runWorker({ op: 'suggest', prefix }))
-}))
-// 搜索框轮播提示词
-app.get('/api/cues', wrap(() => cached('cues', 12 * 60 * 60 * 1000,
-  () => runWorker({ op: 'cues' }))))
-// 弹幕（按分集）
-app.get('/api/danmaku/:episodeId', wrap((req) => {
-  const episodeId = req.params.episodeId
-  const seriesId = (req.query.seriesId || '').toString()
-  const cursor = (req.query.cursor || '').toString()
-  const startMs = Number(req.query.startMs || 0) || 0
-  return cached(`dm:${episodeId}:${cursor}:${startMs}`, 6 * 60 * 60 * 1000,
-    () => runWorker({ op: 'danmaku', seriesId, episodeId, cursor, startMs }))
-}))
-// 相关推荐（猜你喜欢）
-app.get('/api/recommend/:seriesId', wrap((req) => {
-  const sid = req.params.seriesId
-  if (String(sid).startsWith('vod_')) return { cellTitle: '', sessionId: '', items: [] }
-  return cached(`rec:${sid}`, 12 * 60 * 60 * 1000,
-    () => runWorker({ op: 'recommend', seriesId: sid }))
-}))
-// 剧集详情
-app.get('/api/series/:seriesId', wrap((req) => {
-  const sid = req.params.seriesId
-  if (String(sid).startsWith('vod_')) return { id: sid, title: '', heat: 0 }
-  return cached(`series:${sid}`, 12 * 60 * 60 * 1000,
-    () => runWorker({ op: 'series', seriesId: sid }))
-}))
-// 短剧排行榜
-app.get('/api/rank', wrap((req) => {
-  const content = (req.query.content || '').toString()
-  const board = (req.query.board || '').toString()
-  const cursor = (req.query.cursor || '').toString()
-  return cached(`rank:${content}:${board}:${cursor}`, 2 * 60 * 60 * 1000,
-    () => runWorker({ op: 'rank', content, board, cursor }))
 }))
 app.get('/api/episodes/:seriesId', wrap(async (req) => {
   const sid = req.params.seriesId
   const cursor = (req.query.cursor || '').toString()
-  if (getStable() && String(sid).startsWith('vod_')) {
+  if (STABLE_FEED && String(sid).startsWith('vod_')) {
     const page = await stableEpisodes(sid)
     noteEpisodeOrder(page && page.items)
     return page
@@ -534,8 +406,7 @@ app.get('/api/play/:episodeId', wrap(async (req, res) => {
 }))
 
 app.get('/api/stream/:episodeId', wrap(async (req, res) => {
-  const epId = safeEpId(req.params.episodeId)
-  if (!epId) return res.status(400).json({ error: 'invalid episodeId' })
+  const epId = req.params.episodeId
   if (isGuestLocked(req, epId)) {
     res.status(403).json({ error: '登录后解锁全部剧集（游客免费试看前2集）', locked: true })
     return
@@ -549,12 +420,8 @@ app.get('/api/stream/:episodeId', wrap(async (req, res) => {
     return
   }
   // 默认最高画质 1080p；可用 ?q= 指定。缓存按画质分开，避免旧低清缓存串味。
-  const quality = safeQuality(req.query.q)
+  const quality = (req.query.q || '1080p').toString()
   const cacheFile = path.join(CACHE_DIR, `cg_${epId}_${quality}.mp4`)
-  // 双保险：确认解析后路径仍在缓存目录内
-  if (!path.resolve(cacheFile).startsWith(path.resolve(CACHE_DIR) + path.sep)) {
-    return res.status(400).json({ error: 'invalid cache path' })
-  }
 
   if (!fs.existsSync(cacheFile)) {
     let job = streamJobs.get(cacheFile)

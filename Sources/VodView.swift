@@ -558,6 +558,8 @@ struct VodPlayerView: View {
                 }
                 .padding(.horizontal, 14).padding(.top, 8)
                 .background(LinearGradient(colors: [.black.opacity(0.6), .clear], startPoint: .top, endPoint: .bottom))
+                MarqueeView()
+                    .padding(.top, 2)
                 Spacer()
             }
 
