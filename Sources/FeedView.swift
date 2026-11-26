@@ -407,7 +407,6 @@ struct FeedCard: View {
         ZStack {
             if model.player != nil {
                 TencentPlayerView(model: model)
-                    .ignoresSafeArea()
             } else {
                 // 封面
                 AsyncImage(url: URL(string: drama.coverUrl)) { img in
@@ -456,88 +455,22 @@ struct FeedCard: View {
                 }
             }
 
-            // 底部信息
-            VStack {
-                Spacer()
-                // 断点续播提示（4 秒后淡出）
-                if let tip = model.resumeTip {
+            // 断点续播提示（顶部独立浮层，4 秒后淡出）
+            if let tip = model.resumeTip {
+                VStack {
                     HStack(spacing: 6) {
                         Image(systemName: "clock.arrow.circlepath")
-                        Text(tip)
-                            .font(.caption)
+                        Text(tip).font(.caption)
                     }
                     .foregroundColor(.white)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 8)
                     .background(.black.opacity(0.6), in: Capsule())
-                    .padding(.bottom, 8)
-                    .transition(.opacity)
-                }
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        if !drama.description.isEmpty {
-                            Text(drama.description)
-                                .font(.caption)
-                                .foregroundColor(.white.opacity(0.75))
-                                .lineLimit(2)
-                        }
-                        if drama.episodeCount > 0 {
-                            Text("全 \(drama.episodeCount) 集")
-                                .font(.caption2)
-                                .foregroundColor(.white.opacity(0.6))
-                        }
-                    }
+                    .padding(.top, 90)
                     Spacer()
-                    Button { showComments = true } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: "bubble.right")
-                                .font(.system(size: 23))
-                            Text("评论").font(.caption2)
-                        }
-                        .foregroundColor(.white)
-                    }
-                    Button {
-                        library.toggleLike(drama.id)
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: library.isLiked(drama.id) ? "hand.thumbsup.fill" : "hand.thumbsup")
-                                .font(.system(size: 23))
-                            Text("赞").font(.caption2)
-                        }
-                        .foregroundColor(library.isLiked(drama.id) ? .orange : .white)
-                    }
-                    Button {
-                        library.toggleFavorite(drama)
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: library.isFavorite(drama.id) ? "heart.fill" : "heart")
-                                .font(.system(size: 23))
-                            Text("收藏").font(.caption2)
-                        }
-                        .foregroundColor(library.isFavorite(drama.id) ? .pink : .white)
-                    }
-                    Button {
-                        model.showQuality = true
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: "slider.horizontal.3")
-                                .font(.system(size: 24))
-                            Text(model.quality).font(.caption2)
-                        }
-                        .foregroundColor(.orange)
-                    }
-                    Button {
-                        model.showEpisodes = true
-                    } label: {
-                        VStack(spacing: 3) {
-                            Image(systemName: "list.bullet")
-                                .font(.system(size: 24))
-                            Text("选集").font(.caption2)
-                        }
-                        .foregroundColor(.white)
-                    }
                 }
-                .padding(14)
+                .allowsHitTesting(false)
+                .transition(.opacity)
             }
 
             // 顶部集数信息条（第几集 / 共几集）
@@ -569,7 +502,26 @@ struct FeedCard: View {
                                 .lineLimit(1)
                         }
                     }
+                    .allowsHitTesting(false)
                     Spacer()
+                    // 顶部快捷操作：评论 / 赞 / 收藏
+                    HStack(spacing: 14) {
+                        Button { showComments = true } label: {
+                            Image(systemName: "bubble.right")
+                                .font(.system(size: 20))
+                                .foregroundColor(.white)
+                        }
+                        Button { library.toggleLike(drama.id) } label: {
+                            Image(systemName: library.isLiked(drama.id) ? "hand.thumbsup.fill" : "hand.thumbsup")
+                                .font(.system(size: 20))
+                                .foregroundColor(library.isLiked(drama.id) ? .orange : .white)
+                        }
+                        Button { library.toggleFavorite(drama) } label: {
+                            Image(systemName: library.isFavorite(drama.id) ? "heart.fill" : "heart")
+                                .font(.system(size: 20))
+                                .foregroundColor(library.isFavorite(drama.id) ? .pink : .white)
+                        }
+                    }
                 }
                 .padding(.horizontal, 14)
                 .padding(.vertical, 10)
@@ -581,7 +533,6 @@ struct FeedCard: View {
                 )
                 Spacer()
             }
-            .allowsHitTesting(false)
 
             // 切集边界提示（居中）
             if let tip = model.switchTip {
