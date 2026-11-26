@@ -198,14 +198,16 @@ struct VodPosterCell: View {
                 .foregroundColor(.white)
                 .lineLimit(2)
                 .multilineTextAlignment(.leading)
-                // 必须限定 maxWidth，否则文字按理想宽度溢出列宽、与相邻格子重叠
-                .frame(maxWidth: .infinity, minHeight: 34, alignment: .top)
+                // 限制宽度让文字按列宽换行，垂直方向按内容撑开，不设固定高度（否则长标题会被压缩重叠）
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
             let year = item.year ?? ""
             let typeName = item.typeName ?? ""
             if !year.isEmpty || !typeName.isEmpty {
                 Text([year, typeName].filter { !$0.isEmpty }.joined(separator: " · "))
                     .font(.caption2).foregroundColor(.white.opacity(0.5))
                     .lineLimit(1)
+                    .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
         }
