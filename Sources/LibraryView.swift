@@ -9,6 +9,7 @@ struct LibraryView: View {
     @State private var showAdmin = false
     @State private var showChangePassword = false
     @State private var showAnnouncements = false
+    @State private var showDiscover = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
@@ -37,6 +38,26 @@ struct LibraryView: View {
                     AnnouncementsView()
                 }
                 .navigationViewStyle(.stack)
+            }
+
+            // 发现入口（动态页面，后台配置即生效）
+            Button { showDiscover = true } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "sparkles.rectangle.stack").foregroundColor(.orange)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("发现").font(.subheadline.bold()).foregroundColor(.white)
+                        Text("精彩内容 · 后台实时更新").font(.caption2).foregroundColor(.white.opacity(0.5))
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right").foregroundColor(.white.opacity(0.4))
+                }
+                .padding(12)
+                .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 10))
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 14)
+            .sheet(isPresented: $showDiscover) {
+                DynamicPagesView(store: store)
             }
 
             // 管理后台入口（管理员可见）

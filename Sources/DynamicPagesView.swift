@@ -1,10 +1,11 @@
 import SwiftUI
 
 // MARK: - 动态页面（后台下发 JSON，原生渲染）
-// 「发现」Tab 的全部内容由服务端 /api/pages 驱动。
+// 「发现」页的全部内容由服务端 /api/pages 驱动（入口在「我的」页）。
 // 后台改配置 → App 下拉刷新即生效，无需更新软件、无网页。
 struct DynamicPagesView: View {
     @ObservedObject var store: DramaStore
+    @Environment(\.dismiss) private var dismiss
     @State private var pages: [DynamicPage] = []
     @State private var loading = true
     @State private var error: String?
@@ -32,6 +33,11 @@ struct DynamicPagesView: View {
             .navigationTitle("发现")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button { dismiss() } label: {
+                        Text("完成").foregroundColor(.orange)
+                    }
+                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { Task { await load(force: true) } } label: {
                         Image(systemName: "arrow.clockwise").foregroundColor(.orange)
@@ -285,16 +291,20 @@ struct DynamicPagesView: View {
                 description: item?.subtitle ?? "",
                 episodeCount: 0
             )
+            dismiss()
             store.openPlayer(series)
         case .vod:
             // VodView 详情为内部状态，外部直接切到影视 Tab
+            dismiss()
             store.selectedTab = 3
         case .search(let kw):
             guard !kw.isEmpty else { return }
+            dismiss()
             store.searchText = kw
             store.selectedTab = 2
             Task { await store.search(kw) }
         case .tab(let n):
+            dismiss()
             store.selectedTab = min(max(n, 0), 4)
         case .url(let s):
             if let url = URL(string: s) { UIApplication.shared.open(url) }
