@@ -24,6 +24,7 @@ import { listVod, vodCategories, vodSources, detailVod } from './vod.mjs'
 import { getWatermark, updateWatermark } from './watermark.mjs'
 import { getMarquee, updateMarquee } from './marquee.mjs'
 import { getPages, updatePages } from './pages.mjs'
+import { aiChatCompletions, aiResponses, aiProxyStatus } from './aiproxy.mjs'
 import {
   stableFeed, stableSearch, stableHot, stableEpisodes,
   stableM3U8Url, serveHLS, serveSegment,
@@ -362,6 +363,11 @@ app.post('/api/admin/marquee/update', superAdminMiddleware, wrap(updateMarquee))
 // 动态页面（原生渲染，后台配置即生效）
 app.get('/api/pages', wrap(getPages))
 app.post('/api/admin/pages/update', superAdminMiddleware, wrap(updatePages))
+
+// AI 中转代理：强制非流式，规避手机网络读 SSE 断流。无需鉴权（自用）。
+app.post('/api/ai/chat/completions', wrap(aiChatCompletions))
+app.post('/api/ai/responses', wrap(aiResponses))
+app.get('/api/ai/status', wrap(async () => aiProxyStatus()))
 
 // 影视系统（电影/电视剧/综艺/动漫，公开拉取）
 app.get('/api/vod/categories', wrap(vodCategories))
