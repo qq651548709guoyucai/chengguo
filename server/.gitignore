@@ -1,0 +1,11 @@
+# 敏感配置：对象存储密钥、用户数据，绝不提交
+.env
+.env.*
+!.env.example
+data/
+cache/
+playcache/
+*.log
+__pycache__/
+node_modules/
+.config/

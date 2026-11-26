@@ -7,6 +7,8 @@
 //   GET /api/episodes/:seriesId        分集列表（?cursor= 翻页）
 //   GET /api/play/:episodeId           播放信息（含加密流的 key）
 //   GET /api/stream/:episodeId         解密后的 mp4 流（支持 Range，可 ?q=540p）
+// .env 预加载：必须放在所有 import 之前，确保读取 process.env 的模块拿到配置
+import './loadenv.mjs'
 import express from 'express'
 import {
   authMiddleware, adminMiddleware, superAdminMiddleware, register, login, me, changePassword,
@@ -21,12 +23,14 @@ import {
 import { listVod, vodCategories, vodSources, detailVod } from './vod.mjs'
 import { getWatermark, updateWatermark } from './watermark.mjs'
 import { getMarquee, updateMarquee } from './marquee.mjs'
+import { getPages, updatePages } from './pages.mjs'
 import {
   stableFeed, stableSearch, stableHot, stableEpisodes,
   stableM3U8Url, serveHLS, serveSegment,
 } from './stablefeed.mjs'
 import { spawn } from 'child_process'
 import { decryptFile } from './mp4decrypt.mjs'
+import { cdnEnabled, uploadFile, objectExists, publicUrl } from './cdn.mjs'
 import fs from 'fs'
 import https from 'https'
 import path from 'path'
@@ -292,6 +296,7 @@ async function runPlayCached(epId) {
 
 // ---------- 流下载去重 ----------
 const streamJobs = new Map()
+const cdnJobs = new Map()   // CDN 上传任务去重：同一集并发只上传一次
 
 // ---------- 服务 ----------
 const app = express()
@@ -352,6 +357,10 @@ app.post('/api/admin/watermark/update', superAdminMiddleware, wrap(async (req, r
 // 播放器跑马灯（公开拉取；修改仅超级管理员）
 app.get('/api/marquee', wrap(getMarquee))
 app.post('/api/admin/marquee/update', superAdminMiddleware, wrap(updateMarquee))
+
+// 动态页面（原生渲染，后台配置即生效）
+app.get('/api/pages', wrap(getPages))
+app.post('/api/admin/pages/update', superAdminMiddleware, wrap(updatePages))
 
 // 影视系统（电影/电视剧/综艺/动漫，公开拉取）
 app.get('/api/vod/categories', wrap(vodCategories))
@@ -521,6 +530,33 @@ app.get('/api/stream/:episodeId', wrap(async (req, res) => {
     }
     const out = await job
     void out
+  }
+
+  // 方案A：解密后甩到对象存储，302 让 App 直连 CDN，本机零带宽。
+  // 未配置 CDN 或上传失败时，自动回退本机 sendFile（保持原有行为）。
+  const objectKey = `${epId}_${quality}.mp4`
+  if (cdnEnabled) {
+    let url = publicUrl(objectKey)
+    let ready = await objectExists(objectKey)
+    if (!ready) {
+      let job = cdnJobs.get(objectKey)
+      if (!job) {
+        job = uploadFile(cacheFile, objectKey)
+          .then(u => { console.log(`[cdn] ${epId}/${quality} 已上传 ${u}`); return u })
+          .catch(e => { console.log(`[cdn] ${epId}/${quality} 上传失败: ${String(e && e.message || e).slice(0,200)}`); return null })
+          .finally(() => cdnJobs.delete(objectKey))
+        cdnJobs.set(objectKey, job)
+      }
+      const uploaded = await job
+      ready = !!uploaded
+      if (uploaded) url = uploaded
+    }
+    if (ready) {
+      // 303 让客户端对 GET 用 CDN URL 重发（AVPlayer 会跟随跳转）
+      res.redirect(302, url)
+      return
+    }
+    // 上传失败 → 落到下面 sendFile 降级
   }
 
   res.setHeader('Content-Type', 'video/mp4')

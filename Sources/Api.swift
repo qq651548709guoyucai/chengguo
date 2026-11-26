@@ -95,6 +95,85 @@ struct MarqueeConfig: Decodable {
     let opacity: Double
 }
 
+// MARK: - 动态页面（后台下发 JSON，App 原生渲染，改配置即生效无需更新）
+struct DynamicPages: Decodable {
+    let version: Int?
+    let pages: [DynamicPage]
+    enum CodingKeys: String, CodingKey { case version, pages }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        version = (try? c.decode(Int.self, forKey: .version)) ?? 1
+        pages = (try? c.decode([DynamicPage].self, forKey: .pages)) ?? []
+    }
+}
+
+struct DynamicPage: Decodable, Identifiable {
+    let id: String
+    let name: String
+    let sections: [PageSection]
+    enum CodingKeys: String, CodingKey { case id, name, sections }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(String.self, forKey: .id)) ?? UUID().uuidString
+        name = (try? c.decode(String.self, forKey: .name)) ?? "发现"
+        sections = (try? c.decode([PageSection].self, forKey: .sections)) ?? []
+    }
+}
+
+struct PageSection: Decodable {
+    let type: String
+    let title: String
+    let subtitle: String
+    let text: String
+    let action: String
+    let columns: Int
+    let items: [SectionItem]
+    enum CodingKeys: String, CodingKey { case type, title, subtitle, text, action, columns, items }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        type = (try? c.decode(String.self, forKey: .type)) ?? "text"
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        subtitle = (try? c.decode(String.self, forKey: .subtitle)) ?? ""
+        text = (try? c.decode(String.self, forKey: .text)) ?? ""
+        action = (try? c.decode(String.self, forKey: .action)) ?? ""
+        columns = (try? c.decode(Int.self, forKey: .columns)) ?? 3
+        items = (try? c.decode([SectionItem].self, forKey: .items)) ?? []
+    }
+}
+
+struct SectionItem: Decodable {
+    let title: String
+    let cover: String
+    let subtitle: String
+    let action: String
+    enum CodingKeys: String, CodingKey { case title, cover, subtitle, action }
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        title = (try? c.decode(String.self, forKey: .title)) ?? ""
+        cover = (try? c.decode(String.self, forKey: .cover)) ?? ""
+        subtitle = (try? c.decode(String.self, forKey: .subtitle)) ?? ""
+        action = (try? c.decode(String.self, forKey: .action)) ?? ""
+    }
+}
+
+/// 跳转动作：play:剧ID / vod:影视ID / search:关键词 / tab:0~4 / url:https://...
+enum PageAction {
+    case play(String), vod(String), search(String), tab(Int), url(String), none
+    init(_ raw: String) {
+        guard let i = raw.firstIndex(of: ":") else { self = .none; return }
+        let kind = String(raw[raw.startIndex..<i])
+        let payload = String(raw[raw.index(after: i)...])
+        switch kind {
+        case "play": self = .play(payload)
+        case "vod": self = .vod(payload)
+        case "search": self = .search(payload)
+        case "tab": self = .tab(Int(payload) ?? 0)
+        case "url": self = .url(payload)
+        default: self = .none
+        }
+    }
+}
+
 enum Api {
     // 2026-11-24：切换到自建阿里云服务器（Nginx 反代 80 -> 3002）
     static let base = "http://47.100.207.19"
@@ -204,6 +283,11 @@ enum Api {
 
     static func feed(type: String = "real") async throws -> SeriesPage {
         try await get("/api/feed", query: ["type": type])
+    }
+
+    /// 动态页面配置（发现 Tab），后台改完即生效
+    static func pages() async throws -> DynamicPages {
+        try await get("/api/pages")
     }
 
     static func search(_ q: String, source: String = "all") async throws -> SeriesPage {

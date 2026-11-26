@@ -204,6 +204,13 @@ struct ContentView: View {
                 Label("我的", systemImage: "heart.fill")
             }
             .tag(4)
+
+            // 动态页面（后台配置即生效，无需更新 App）
+            DynamicPagesView(store: store)
+                .tabItem {
+                    Label("发现", systemImage: "sparkles.rectangle.stack")
+                }
+                .tag(5)
         }
         .accentColor(.orange)
     }

@@ -187,6 +187,34 @@
       <div id="mqMsg" class="msg"></div>
     </div>
 
+    <!-- 动态页面配置（仅超级管理员可见）：App「发现」Tab 内容，改完即生效 -->
+    <div id="pgCard" class="card" style="margin-top:18px">
+      <div class="row" style="justify-content:space-between; margin-bottom:6px">
+        <strong>动态页面（发现 Tab）</strong>
+        <button class="mini" onclick="pgAddBlock()">+ 添加区块</button>
+      </div>
+      <div style="font-size:12px;color:#8b929c;margin-bottom:10px;line-height:1.7">
+        App「发现」页的内容全部由这里驱动，<b style="color:#ffa940">保存后 App 下拉刷新即生效，无需更新软件</b>。<br>
+        区块类型：<code>banner</code> 横幅 / <code>grid</code> 九宫格 / <code>list</code> 列表 / <code>text</code> 标题文字 / <code>notice</code> 公告条 / <code>button</code> 按钮组。<br>
+        跳转动作 action：<code>play:剧ID</code> / <code>vod:影视ID</code> / <code>search:关键词</code> / <code>tab:0~4</code> / <code>url:https://...</code>。
+      </div>
+      <textarea id="pgJson" spellcheck="false"
+        style="width:100%;height:320px;background:#0b0d11;border:1px solid #333a47;color:#c8d1dc;padding:12px;border-radius:8px;font:12px/1.6 ui-monospace,Menlo,Consolas,monospace;resize:vertical"></textarea>
+      <div class="row" style="gap:8px;margin-top:10px;flex-wrap:wrap">
+        <button class="mini" onclick="pgTemplate('banner')">插横幅</button>
+        <button class="mini" onclick="pgTemplate('grid')">插九宫格</button>
+        <button class="mini" onclick="pgTemplate('list')">插列表</button>
+        <button class="mini" onclick="pgTemplate('text')">插标题</button>
+        <button class="mini" onclick="pgTemplate('notice')">插公告</button>
+        <button class="mini" onclick="pgTemplate('button')">插按钮组</button>
+      </div>
+      <div class="row" style="gap:8px;margin-top:10px">
+        <button class="mini" onclick="savePages()">保存并生效</button>
+        <button class="mini" onclick="loadPages()">重新载入</button>
+      </div>
+      <div id="pgMsg" class="msg"></div>
+    </div>
+
     <!-- 管理员管理（仅超级管理员可见） -->
     <div id="adminMgrCard" class="card" style="margin-top:18px">
       <div class="row" style="justify-content:space-between; margin-bottom:12px">
@@ -317,18 +345,19 @@ function doLogout() {
   document.getElementById('loginView').classList.remove('hidden')
 }
 function applyPermissionUI() {
-  // 普通管理员隐藏：发布公告按钮、管理员管理卡片、水印设置、跑马灯设置
+  // 普通管理员隐藏：发布公告按钮、管理员管理卡片、水印设置、跑马灯设置、动态页面
   document.getElementById('btnAddAnn').style.display = IS_SUPER ? '' : 'none'
   document.getElementById('adminMgrCard').style.display = IS_SUPER ? '' : 'none'
   document.getElementById('wmCard').style.display = IS_SUPER ? '' : 'none'
   document.getElementById('mqCard').style.display = IS_SUPER ? '' : 'none'
+  document.getElementById('pgCard').style.display = IS_SUPER ? '' : 'none'
 }
 function showMain() {
   document.getElementById('loginView').classList.add('hidden')
   document.getElementById('mainView').classList.remove('hidden')
   applyPermissionUI()
   loadStats(); loadUsers(); loadComments(); loadAnnouncements()
-  if (IS_SUPER) { loadAdmins(); loadWatermark(); loadMarquee() }
+  if (IS_SUPER) { loadAdmins(); loadWatermark(); loadMarquee(); loadPages() }
 }
 async function loadStats() {
   try {
@@ -573,6 +602,69 @@ async function saveMarquee() {
     await api('/api/admin/marquee/update', { method: 'POST', body })
     msg('mqMsg', '已保存，播放器下次打开时生效', true)
   } catch (e) { msg('mqMsg', e.message, false) }
+}
+
+// ---------- 动态页面（发现 Tab） ----------
+function pgRead() {
+  try { return JSON.parse(document.getElementById('pgJson').value) }
+  catch (e) { msg('pgMsg', 'JSON 格式错误：' + e.message, false); return null }
+}
+function pgWrite(obj) {
+  document.getElementById('pgJson').value = JSON.stringify(obj, null, 2)
+}
+async function loadPages() {
+  try {
+    const d = await api('/api/pages')
+    pgWrite(d)
+  } catch (e) { msg('pgMsg', '载入失败：' + e.message, false) }
+}
+async function savePages() {
+  const obj = pgRead()
+  if (!obj) return
+  if (!Array.isArray(obj.pages) || obj.pages.length === 0) {
+    msg('pgMsg', 'pages 至少要有一个页面', false); return
+  }
+  try {
+    const d = await api('/api/admin/pages/update', { method: 'POST', body: obj })
+    pgWrite(d)
+    msg('pgMsg', '已保存，App 下拉刷新「发现」页即生效', true)
+  } catch (e) { msg('pgMsg', e.message, false) }
+}
+// 往第一个页面的 sections 追加一个区块模板
+function pgAddBlock() { pgTemplate('text') }
+function pgTemplate(type) {
+  const obj = pgRead()
+  if (!obj || !Array.isArray(obj.pages) || !obj.pages[0]) return
+  const secs = obj.pages[0].sections || (obj.pages[0].sections = [])
+  let sec
+  switch (type) {
+    case 'banner':
+      sec = { type: 'banner', title: '精选横幅', items: [
+        { title: '点我打开首页', cover: 'https://picsum.photos/600/300', action: 'tab:0' },
+        { title: '搜短剧', cover: 'https://picsum.photos/600/301', action: 'search:短剧' },
+      ] }; break
+    case 'grid':
+      sec = { type: 'grid', title: '精彩推荐', columns: 3, items: [
+        { title: '示例1', cover: 'https://picsum.photos/300/400', action: 'search:重生' },
+        { title: '示例2', cover: 'https://picsum.photos/300/401', action: 'tab:3' },
+      ] }; break
+    case 'list':
+      sec = { type: 'list', title: '最近热播', items: [
+        { title: '示例剧集', subtitle: '副标题说明', cover: 'https://picsum.photos/300/402', action: 'tab:0' },
+      ] }; break
+    case 'notice':
+      sec = { type: 'notice', text: '这是一条公告，点击可跳转', action: 'tab:0' }; break
+    case 'button':
+      sec = { type: 'button', title: '快捷入口', items: [
+        { title: '首页', action: 'tab:0' },
+        { title: '影视', action: 'tab:3' },
+      ] }; break
+    default:
+      sec = { type: 'text', title: '区块标题', subtitle: '这里写副标题说明' }
+  }
+  secs.push(sec)
+  pgWrite(obj)
+  msg('pgMsg', '已插入一个 ' + type + ' 区块，改好内容后点「保存并生效」', true)
 }
 
 // ESC 关闭弹窗
