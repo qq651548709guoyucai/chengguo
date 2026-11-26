@@ -5,7 +5,7 @@ import SwiftUI
 // 后台改配置 → App 下拉刷新即生效，无需更新软件、无网页。
 struct DynamicPagesView: View {
     @ObservedObject var store: DramaStore
-    @State private var pages: [Api.DynamicPage] = []
+    @State private var pages: [DynamicPage] = []
     @State private var loading = true
     @State private var error: String?
     @State private var selectedPage = 0
@@ -86,7 +86,7 @@ struct DynamicPagesView: View {
     }
 
     @ViewBuilder
-    private func sectionView(_ sec: Api.PageSection) -> some View {
+    private func sectionView(_ sec: PageSection) -> some View {
         switch sec.type {
         case "text":   textSection(sec)
         case "notice": noticeSection(sec)
@@ -99,7 +99,7 @@ struct DynamicPagesView: View {
     }
 
     // MARK: 标题文字
-    private func textSection(_ sec: Api.PageSection) -> some View {
+    private func textSection(_ sec: PageSection) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             if !sec.title.isEmpty {
                 Text(sec.title).font(.title3.bold()).foregroundColor(.white)
@@ -114,7 +114,7 @@ struct DynamicPagesView: View {
     }
 
     // MARK: 公告条
-    private func noticeSection(_ sec: Api.PageSection) -> some View {
+    private func noticeSection(_ sec: PageSection) -> some View {
         Button { handle(sec.action) } label: {
             HStack(spacing: 10) {
                 Image(systemName: "megaphone.fill").foregroundColor(.orange)
@@ -135,7 +135,7 @@ struct DynamicPagesView: View {
     }
 
     // MARK: 按钮组
-    private func buttonSection(_ sec: Api.PageSection) -> some View {
+    private func buttonSection(_ sec: PageSection) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if !sec.title.isEmpty {
                 Text(sec.title).font(.headline).foregroundColor(.white)
@@ -158,7 +158,7 @@ struct DynamicPagesView: View {
     }
 
     // MARK: 横幅（横向滚动大图）
-    private func bannerSection(_ sec: Api.PageSection) -> some View {
+    private func bannerSection(_ sec: PageSection) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if !sec.title.isEmpty {
                 Text(sec.title).font(.headline).foregroundColor(.white).padding(.horizontal, 14)
@@ -189,7 +189,7 @@ struct DynamicPagesView: View {
     }
 
     // MARK: 九宫格
-    private func gridSection(_ sec: Api.PageSection) -> some View {
+    private func gridSection(_ sec: PageSection) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             if !sec.title.isEmpty {
                 Text(sec.title).font(.headline).foregroundColor(.white).padding(.horizontal, 14)
@@ -218,7 +218,7 @@ struct DynamicPagesView: View {
     }
 
     // MARK: 列表（横向滚动竖版卡片）
-    private func listSection(_ sec: Api.PageSection) -> some View {
+    private func listSection(_ sec: PageSection) -> some View {
         VStack(alignment: .leading, spacing: 8) {
             if !sec.title.isEmpty {
                 Text(sec.title).font(.headline).foregroundColor(.white).padding(.horizontal, 14)
