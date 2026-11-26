@@ -4,6 +4,7 @@ import crypto from 'crypto'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
+import { checkNickname, checkUsername } from './guard.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, 'data')
@@ -129,7 +130,13 @@ export function register(req, res) {
   if (db.users.find((u) => u.username.toLowerCase() === username.toLowerCase())) {
     return res.status(409).json({ error: '用户名已存在' })
   }
-  const nickname = cleanNickname(req.body?.nickname, username)
+  // 内容审核：用户名/名号含广告、QQ号、微信等引流内容则拒绝注册
+  const unameCheck = checkUsername(username)
+  if (unameCheck.blocked) return res.status(400).json({ error: unameCheck.reason })
+  const rawNick = (req.body?.nickname ?? '').toString().trim()
+  const nickCheck = checkNickname(rawNick)
+  if (nickCheck.blocked) return res.status(400).json({ error: nickCheck.reason })
+  const nickname = cleanNickname(rawNick, username)
   const avatar = cleanAvatar(req.body?.avatar)
   const user = {
     id: 'u_' + crypto.randomBytes(8).toString('hex'),
@@ -190,7 +197,14 @@ export function updateProfile(req, res) {
   const b = req.body || {}
   const hasNick = Object.prototype.hasOwnProperty.call(b, 'nickname')
   const hasAvatar = Object.prototype.hasOwnProperty.call(b, 'avatar')
-  if (hasNick) req.user.nickname = cleanNickname(b.nickname, req.user.username)
+  if (hasNick) {
+    // 管理员可免审（便于管理），普通用户走内容审核
+    if (req.user.role !== 'admin') {
+      const r = checkNickname((b.nickname ?? '').toString().trim())
+      if (r.blocked) return res.status(400).json({ error: r.reason })
+    }
+    req.user.nickname = cleanNickname(b.nickname, req.user.username)
+  }
   if (hasAvatar) req.user.avatar = cleanAvatar(b.avatar)
   save()
   console.log(`[auth] 修改资料: ${req.user.username} -> ${req.user.nickname}`)

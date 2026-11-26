@@ -4,6 +4,7 @@ import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import { publicUserById } from './auth.mjs'
+import { checkComment } from './guard.mjs'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const DATA_DIR = path.join(__dirname, 'data')
@@ -57,6 +58,11 @@ export function postComment(req, res) {
   if (!text) return res.status(400).json({ error: '评论内容不能为空' })
   if (text.length > 500) return res.status(400).json({ error: '评论最多 500 字' })
   if (!seriesId) return res.status(400).json({ error: '缺少剧集标识' })
+  // 内容审核：管理员可免审，普通用户拦截广告/QQ号等引流内容
+  if (req.user.role !== 'admin') {
+    const r = checkComment(text)
+    if (r.blocked) return res.status(400).json({ error: r.reason })
+  }
 
   let replyTo = null
   if (parentId) {
