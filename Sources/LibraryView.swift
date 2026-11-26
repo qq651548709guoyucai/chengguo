@@ -10,6 +10,7 @@ struct LibraryView: View {
     @State private var showChangePassword = false
     @State private var showAnnouncements = false
     @State private var showDiscover = false
+    @State private var showEditProfile = false
 
     private let columns = Array(repeating: GridItem(.flexible(), spacing: 10), count: 3)
 
@@ -97,24 +98,46 @@ struct LibraryView: View {
         .background(Color.black)
         .navigationTitle("我的")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $showEditProfile) { EditProfileView() }
     }
 
     private var accountHeader: some View {
         HStack(spacing: 12) {
-            Image(systemName: library.isLoggedIn ? "person.crop.circle.fill" : "person.crop.circle")
-                .font(.system(size: 42))
-                .foregroundColor(library.isLoggedIn ? .orange : .white.opacity(0.4))
+            // 头像：登录用户显示选中的 emoji，点击可编辑资料
+            if library.isLoggedIn {
+                Button { showEditProfile = true } label: {
+                    ZStack {
+                        Circle().fill(Color.orange.opacity(0.2)).frame(width: 48, height: 48)
+                        Text(library.currentUser?.avatarEmoji ?? "🙂")
+                            .font(.system(size: 30))
+                    }
+                    .overlay(Circle().stroke(Color.orange.opacity(0.5), lineWidth: 1))
+                }
+                .buttonStyle(.plain)
+            } else {
+                Image(systemName: "person.crop.circle")
+                    .font(.system(size: 42))
+                    .foregroundColor(.white.opacity(0.4))
+            }
 
             VStack(alignment: .leading, spacing: 3) {
                 if library.isLoggedIn {
-                    Text(library.username).font(.headline).foregroundColor(.white)
+                    // 名号（可点编辑），副标题显示登录用户名
+                    Button { showEditProfile = true } label: {
+                        HStack(spacing: 5) {
+                            Text(library.currentUser?.displayName ?? library.username)
+                                .font(.headline).foregroundColor(.white)
+                            Image(systemName: "pencil").font(.caption2).foregroundColor(.white.opacity(0.4))
+                        }
+                    }
+                    .buttonStyle(.plain)
                     HStack(spacing: 4) {
                         if library.isSyncing {
                             ProgressView().scaleEffect(0.6)
                             Text("同步中...").font(.caption2)
                         } else {
                             Image(systemName: "icloud.fill").font(.caption2)
-                            Text("数据已云同步").font(.caption2)
+                            Text("@\(library.username) · 数据已云同步").font(.caption2)
                         }
                     }
                     .foregroundColor(.white.opacity(0.5))

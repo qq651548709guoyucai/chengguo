@@ -18,26 +18,18 @@ try {
 if (!db.users) db.users = []
 
 let saveTimer = null
-function writeNow() {
-  const tmp = USERS_FILE + '.tmp'
-  fs.writeFileSync(tmp, JSON.stringify(db, null, 2))
-  fs.renameSync(tmp, USERS_FILE)
-}
 function save() {
   // 合并写盘，避免频繁 IO
   if (saveTimer) return
   saveTimer = setTimeout(() => {
     saveTimer = null
-    try { writeNow() } catch (e) { console.error('保存用户库失败:', e.message) }
+    try {
+      const tmp = USERS_FILE + '.tmp'
+      fs.writeFileSync(tmp, JSON.stringify(db, null, 2))
+      fs.renameSync(tmp, USERS_FILE)
+    } catch (e) { console.error('保存用户库失败:', e.message) }
   }, 200)
 }
-// 修复 L1：进程退出时强制刷盘，避免 200ms 窗口内丢注册/改密/禁用等操作
-process.on('exit', () => {
-  if (!saveTimer) return
-  clearTimeout(saveTimer)
-  saveTimer = null
-  try { writeNow() } catch (e) { console.error('退出刷盘失败:', e.message) }
-})
 
 function hashPassword(password, salt) {
   salt = salt || crypto.randomBytes(16).toString('hex')
@@ -53,10 +45,27 @@ function verifyPassword(password, stored) {
 }
 function newToken() { return crypto.randomBytes(24).toString('hex') }
 
+// 昵称/头像（内置 emoji 头像，服务端只存标识字符串，不存图片）
+const DEFAULT_AVATAR = '🙂'
+// 昵称：允许中文/字母/数字/下划线，2~16 字符；空则回退用户名
+function cleanNickname(raw, fallback) {
+  const s = (raw ?? '').toString().trim().slice(0, 16)
+  if (!s) return fallback
+  return /^[a-zA-Z0-9_\u4e00-\u9fa5]+$/.test(s) ? s : fallback
+}
+// 头像：只接受白名单 emoji，防止注入超长/异常内容
+const AVATARS = ['🙂','😀','😎','🤩','🥳','😊','😍','🤗','😜','🤔','😴','🥰','😇','🤠','👻','🤖','🐱','🐶','🐼','🦊','🐻','🐯','🦁','🐸','🦄','🐙','🦋','🌸','⭐','🔥','💎','🎮','🍀','🌈','🚀','🏀']
+function cleanAvatar(raw) {
+  const s = (raw ?? '').toString().trim()
+  return AVATARS.includes(s) ? s : DEFAULT_AVATAR
+}
+
 function publicUser(u) {
   return {
     id: u.id,
     username: u.username,
+    nickname: cleanNickname(u.nickname, u.username),
+    avatar: cleanAvatar(u.avatar),
     role: u.role,
     disabled: !!u.disabled,
     createdAt: u.createdAt,
@@ -95,11 +104,6 @@ function findByToken(token) {
   return db.users.find((u) => u.token === token && !u.disabled) || null
 }
 
-// 供 server.mjs 校验 token 真实有效性（修复 H2：游客限看不能被任意非空 token 绕过）
-export function isValidToken(token) {
-  return !!findByToken((token || '').toString().trim())
-}
-
 // ---------- 对外接口 ----------
 
 export function authMiddleware(req, res, next) {
@@ -119,9 +123,13 @@ export function register(req, res) {
   if (db.users.find((u) => u.username.toLowerCase() === username.toLowerCase())) {
     return res.status(409).json({ error: '用户名已存在' })
   }
+  const nickname = cleanNickname(req.body?.nickname, username)
+  const avatar = cleanAvatar(req.body?.avatar)
   const user = {
     id: 'u_' + crypto.randomBytes(8).toString('hex'),
     username,
+    nickname,
+    avatar,
     role: 'user',
     disabled: false,
     passwordHash: hashPassword(password),
@@ -132,7 +140,7 @@ export function register(req, res) {
   }
   db.users.push(user)
   save()
-  console.log(`[auth] 新用户注册: ${username}`)
+  console.log(`[auth] 新用户注册: ${username} (名号: ${nickname})`)
   res.json({ token: user.token, user: publicUser(user) })
 }
 
@@ -169,6 +177,18 @@ export function changePassword(req, res) {
   save()
   console.log(`[auth] 修改密码: ${req.user.username}`)
   res.json({ ok: true })
+}
+
+// 修改个人资料（名号 / 头像），保留其他字段；传空名号则回退用户名
+export function updateProfile(req, res) {
+  const b = req.body || {}
+  const hasNick = Object.prototype.hasOwnProperty.call(b, 'nickname')
+  const hasAvatar = Object.prototype.hasOwnProperty.call(b, 'avatar')
+  if (hasNick) req.user.nickname = cleanNickname(b.nickname, req.user.username)
+  if (hasAvatar) req.user.avatar = cleanAvatar(b.avatar)
+  save()
+  console.log(`[auth] 修改资料: ${req.user.username} -> ${req.user.nickname}`)
+  res.json({ ok: true, user: publicUser(req.user) })
 }
 
 // 用户上传自己的数据（整体覆盖）

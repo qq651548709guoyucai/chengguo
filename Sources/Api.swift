@@ -223,6 +223,17 @@ enum Api {
         let username: String
         let role: String
         let disabled: Bool?
+        let nickname: String?   // 名号（后台可配，缺省回退用户名）
+        let avatar: String?     // 头像 emoji 标识（缺省用默认）
+
+        var displayName: String {
+            let n = (nickname ?? "").trimmingCharacters(in: .whitespaces)
+            return n.isEmpty ? username : n
+        }
+        var avatarEmoji: String {
+            let a = (avatar ?? "").trimmingCharacters(in: .whitespaces)
+            return a.isEmpty ? "🙂" : a
+        }
     }
 
     /// 通用 POST（JSON body），带 token
@@ -243,8 +254,22 @@ enum Api {
         return try JSONDecoder().decode(T.self, from: data)
     }
 
-    static func register(username: String, password: String) async throws -> AuthResponse {
-        try await post("/api/auth/register", body: ["username": username, "password": password])
+    static func register(username: String, password: String, nickname: String = "", avatar: String = "") async throws -> AuthResponse {
+        try await post("/api/auth/register", body: [
+            "username": username, "password": password,
+            "nickname": nickname, "avatar": avatar,
+        ])
+    }
+
+    /// 修改个人资料（名号 / 头像）
+    @discardableResult
+    static func updateProfile(nickname: String? = nil, avatar: String? = nil, token: String) async throws -> AccountUser {
+        struct ProfileResponse: Decodable { let ok: Bool?; let user: AccountUser }
+        var body: [String: Any] = [:]
+        if let nickname { body["nickname"] = nickname }
+        if let avatar { body["avatar"] = avatar }
+        let r: ProfileResponse = try await post("/api/auth/profile", body: body, token: token)
+        return r.user
     }
 
     static func login(username: String, password: String) async throws -> AuthResponse {

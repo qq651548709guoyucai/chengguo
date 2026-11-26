@@ -150,8 +150,8 @@ final class LibraryStore: ObservableObject {
         await pullFromCloud()
     }
 
-    func register(username: String, password: String) async throws {
-        let r = try await Api.register(username: username, password: password)
+    func register(username: String, password: String, nickname: String = "", avatar: String = "") async throws {
+        let r = try await Api.register(username: username, password: password, nickname: nickname, avatar: avatar)
         applyAuth(r)
         remember(username: username, password: password)
         // 新注册：把当前本地数据作为初始值上传
@@ -163,6 +163,13 @@ final class LibraryStore: ObservableObject {
         username = r.user.username
         currentUser = r.user
         guestMode = false
+    }
+
+    /// 修改名号/头像：调服务端后更新本地 currentUser，界面即时刷新
+    func updateProfile(nickname: String? = nil, avatar: String? = nil) async throws {
+        let user = try await Api.updateProfile(nickname: nickname, avatar: avatar, token: token)
+        currentUser = user
+        username = user.username
     }
 
     func logout() {

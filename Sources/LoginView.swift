@@ -12,6 +12,10 @@ struct LoginView: View {
     @State private var busy = false
     @State private var showPassword = false
     @State private var remember = true
+    // 注册用：名号 + 头像
+    @State private var nickname = ""
+    @State private var selectedAvatar = "🙂"
+    private let avatars = ["🙂","😀","😎","🤩","🥳","😊","😍","🤗","😜","🤔","😴","🥰","😇","🤠","👻","🤖","🐱","🐶","🐼","🦊","🐻","🐯","🦁","🐸","🦄","🐙","🦋","🌸","⭐","🔥","💎","🎮","🍀","🌈","🚀","🏀"]
 
     var body: some View {
         NavigationView {
@@ -56,6 +60,31 @@ struct LoginView: View {
 
                         if mode == 1 {
                             field(icon: "lock.rotation", placeholder: "确认密码", text: $confirm, secure: !showPassword)
+
+                            // 名号（昵称，App 内显示用，可与登录用户名不同）
+                            field(icon: "person.text.rectangle", placeholder: "名号（选填，如：追剧达人）", text: $nickname)
+
+                            // 头像选择（内置 emoji，点选即可）
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("选个头像").font(.caption).foregroundColor(.white.opacity(0.6))
+                                LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 8), spacing: 8) {
+                                    ForEach(avatars, id: \.self) { emo in
+                                        Button { selectedAvatar = emo } label: {
+                                            Text(emo)
+                                                .font(.system(size: 24))
+                                                .frame(maxWidth: .infinity)
+                                                .frame(height: 38)
+                                                .background(emo == selectedAvatar ? Color.orange.opacity(0.3) : Color.white.opacity(0.08),
+                                                            in: RoundedRectangle(cornerRadius: 8))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 8)
+                                                        .stroke(emo == selectedAvatar ? Color.orange : Color.clear, lineWidth: 2)
+                                                )
+                                        }
+                                        .buttonStyle(.plain)
+                                    }
+                                }
+                            }
                         }
 
                         // 记住账号密码开关（仅登录模式显示）
@@ -160,7 +189,8 @@ struct LoginView: View {
             if mode == 0 {
                 try await library.login(username: u, password: password)
             } else {
-                try await library.register(username: u, password: password)
+                let nick = nickname.trimmingCharacters(in: .whitespacesAndNewlines)
+                try await library.register(username: u, password: password, nickname: nick, avatar: selectedAvatar)
             }
             // 记住账号密码（按开关）
             library.rememberCredentials = remember

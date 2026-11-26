@@ -11,7 +11,7 @@
 import './loadenv.mjs'
 import express from 'express'
 import {
-  authMiddleware, adminMiddleware, superAdminMiddleware, register, login, me, changePassword,
+  authMiddleware, adminMiddleware, superAdminMiddleware, register, login, me, changePassword, updateProfile,
   syncData, getData, adminListUsers, adminStats, adminToggleUser, adminDeleteUser,
   adminListAdmins, adminCreateAdmin, adminPromoteUser, adminDemoteAdmin,
 } from './auth.mjs'
@@ -319,6 +319,7 @@ app.post('/api/auth/register', wrap(register))
 app.post('/api/auth/login', wrap(login))
 app.get('/api/auth/me', authMiddleware, wrap(me))
 app.post('/api/auth/change-password', authMiddleware, wrap(changePassword))
+app.post('/api/auth/profile', authMiddleware, wrap(updateProfile))
 app.get('/api/data', authMiddleware, wrap(getData))
 app.post('/api/data', authMiddleware, wrap(syncData))
 // 管理后台
